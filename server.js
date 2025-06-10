@@ -21,11 +21,11 @@ app.use(cors());
 app.use(express.json());
 
 // Security headers to enable COOP and COEP
-app.use((req, res, next) => {
-  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
-  res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
-  next();
-});
+//app.use((req, res, next) => {
+  //res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  //res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
+  //next();
+//});
 
 // --- IMPORTANT CHANGE HERE: BigQuery client initialization using environment variables ---
 
