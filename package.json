@@ -22,6 +22,6 @@
     "nodemon": "^3.1.7"
   },
   "engines": {
-    "node": "18.x" // Or "20.x" or the latest LTS version supported by Vercel
+    "node": "18.x"
   }
 }
