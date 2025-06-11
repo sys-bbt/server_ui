@@ -20,5 +20,8 @@
     "google-auth-library": "^9.14.2",
     "jwt-decode": "^4.0.0",
     "nodemon": "^3.1.7"
+  },
+  "engines": {
+    "node": "18.x" // Or "20.x" or the latest LTS version supported by Vercel
   }
 }
