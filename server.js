@@ -38,13 +38,6 @@ const bigQueryClient = new BigQuery({
 });
 // --- END IMPORTANT CHANGE ---
 
----
-
-## Refined `/api/data` Endpoint
-
-The primary change is in how the `email` query parameter is handled. We'll **split the incoming email string by commas and then trim any whitespace** from each resulting email. This ensures that whether a single email or multiple comma-separated emails are provided, we process them individually and correctly. The `REGEXP_CONTAINS` will then be run for **each** of these emails, effectively creating an `OR` condition for matching.
-
-```javascript
 app.get('/api/data', async (req, res) => {
   try {
     const limit = parseInt(req.query.limit, 10) || 500; // radix 10 for parseInt
@@ -76,7 +69,7 @@ app.get('/api/data', async (req, res) => {
     // --- END IMPORTANT PROCESSING ---
 
     const query = `
-      SELECT * FROM \`<span class="math-inline">\{projectId\}\.</span>{bigQueryDataset}.${bigQueryTable}\`
+      SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
       WHERE
         (${emailConditions})
         AND (
@@ -116,8 +109,6 @@ app.get('/api/data', async (req, res) => {
   }
 });
 
-
-
 // Route to get data from the Per_Key_Per_Day table with summed Duration
 app.get('/api/per-key-per-day', async (req, res) => {
   try {
@@ -130,8 +121,8 @@ app.get('/api/per-key-per-day', async (req, res) => {
       if (!acc[key]) {
         acc[key] = { totalDuration: 0, entries: [] };
       }
-      acc[key].totalDuration += parseFloat(item.Duration) || 0; // Add Duration
-      acc[key].entries.push(item); // Add the item itself for reference if needed
+      acc[key].totalDuration += parseFloat(item.Duration) || 0;
+      acc[key].entries.push(item);
       return acc;
     }, {});
 
@@ -149,7 +140,6 @@ app.get('/api/per-person-per-day', async (req, res) => {
     const query = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable3}\``;
     const [rows] = await bigQueryClient.query(query);
 
-    // Directly return the fetched rows
     console.log("Fetched data:", rows);
     res.status(200).json(rows);
   } catch (err) {
@@ -157,12 +147,6 @@ app.get('/api/per-person-per-day', async (req, res) => {
     res.status(500).json({ message: err.message, stack: err.stack });
   }
 });
-
-
-
-
-
-
 
 // post req
 app.post('/api/post', async (req, res) => {
@@ -188,18 +172,16 @@ app.post('/api/post', async (req, res) => {
     Updated_at,
     Time_Left_For_Next_Task_dd_hh_mm_ss,
     Card_Corner_Status,
-    sliders // This is expected to be an array of slider data
+    sliders
   } = req.body;
 
-  console.log("Hi",req.body);
+  console.log("Hi", req.body);
 
-  // Check if sliders data is provided
   if (!sliders || sliders.length === 0) {
     return res.status(400).send({ error: 'Slider data is mandatory.' });
   }
 
   try {
-    // Handle task details (insert or update)
     const checkQuery = `SELECT Key FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\` WHERE Key = @Key`;
     const checkOptions = {
       query: checkQuery,
@@ -210,8 +192,7 @@ app.post('/api/post', async (req, res) => {
     const [existingTasks] = await bigQueryClient.query(checkOptions);
 
     if (existingTasks.length > 0) {
-      // If task exists, update it
-      const updateQuery = `UPDATE \`${projectId}.${bigQueryDataset}.${bigQueryTable}\` SET 
+      const updateQuery = `UPDATE \`${projectId}.${bigQueryDataset}.${bigQueryTable}\` SET
         Delivery_code = @Delivery_code,
         DelCode_w_o__ = @DelCode_w_o__,
         Step_ID = @Step_ID,
@@ -223,15 +204,15 @@ app.post('/api/post', async (req, res) => {
         Planned_Delivery_Timestamp = @Planned_Delivery_Timestamp,
         Responsibility = @Responsibility,
         Current_Status = @Current_Status,
-        Email =  @Email,
+        Email = @Email,
         Total_Tasks = @Total_Tasks,
         Completed_Tasks = @Completed_Tasks,
         Planned_Tasks = @Planned_Tasks,
+        Total_Tasks = @Total_Tasks,
         Percent_Tasks_Completed = @Percent_Tasks_Completed,
         Created_at = @Created_at,
         Updated_at = @Updated_at,
         Time_Left_For_Next_Task_dd_hh_mm_ss = @Time_Left_For_Next_Task_dd_hh_mm_ss,
-        
         Card_Corner_Status = @Card_Corner_Status
         WHERE Key = @Key`;
 
@@ -258,7 +239,6 @@ app.post('/api/post', async (req, res) => {
           Created_at,
           Updated_at,
           Time_Left_For_Next_Task_dd_hh_mm_ss,
-          
           Card_Corner_Status
         },
         types: {
@@ -282,14 +262,12 @@ app.post('/api/post', async (req, res) => {
           Created_at: 'STRING',
           Updated_at: 'STRING',
           Time_Left_For_Next_Task_dd_hh_mm_ss: 'STRING',
-          
           Card_Corner_Status: 'STRING',
         }
       };
 
       await bigQueryClient.createQueryJob(updateOptions);
     } else {
-      // If task doesn't exist, insert it
       const insertQuery = `INSERT INTO \`${projectId}.${bigQueryDataset}.${bigQueryTable}\` (Key, Delivery_code, DelCode_w_o__, Step_ID, Task_Details, Frequency___Timeline, Client, Short_Description, Planned_Start_Timestamp, Planned_Delivery_Timestamp, Responsibility, Current_Status,Email, Total_Tasks, Completed_Tasks, Planned_Tasks, Percent_Tasks_Completed, Created_at, Updated_at, Time_Left_For_Next_Task_dd_hh_mm_ss, Card_Corner_Status)
       VALUES (@Key, @Delivery_code, @DelCode_w_o__, @Step_ID, @Task_Details, @Frequency___Timeline, @Client, @Short_description, @Planned_Start_Timestamp, @Planned_Delivery_Timestamp, @Responsibility, @Current_Status,@Email, @Total_Tasks, @Completed_Tasks, @Planned_Tasks, @Percent_Tasks_Completed, @Created_at, @Updated_at, @Time_Left_For_Next_Task_dd_hh_mm_ss, @Card_Corner_Status)`;
 
@@ -346,17 +324,15 @@ app.post('/api/post', async (req, res) => {
       await bigQueryClient.createQueryJob(insertOptions);
     }
 
-    // Handle slider values (insert into Per_Key_Per_Day)
     console.log('Received sliders data:', sliders);
 
-    // Prepare the insert or update queries for sliders
     const insertOrUpdateSliderQueries = await Promise.all(sliders.map(async (slider) => {
       const selectQuery = {
         query: `SELECT duration FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\` WHERE Key = @Key AND day = @day AND Planned_Delivery_Slot=@Planned_Delivery_Slot LIMIT 1`,
         params: {
           Key: Number(Key),
           day: slider.day,
-          Planned_Delivery_Slot:slider.slot,
+          Planned_Delivery_Slot: slider.slot,
         },
         types: {
           Key: 'INT64',
@@ -365,47 +341,43 @@ app.post('/api/post', async (req, res) => {
         },
       };
 
-      // Check if the slider data already exists
       const [sliderRows] = await bigQueryClient.query(selectQuery);
 
       if (sliderRows.length > 0) {
-        // Update existing slider record
         return {
           query: `UPDATE \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\` SET duration = @duration WHERE Key = @Key AND day = @day AND Planned_Delivery_Slot=@Planned_Delivery_Slot`,
           params: {
             Key: Number(Key),
             day: slider.day,
             duration: Number(slider.duration),
-            Planned_Delivery_Slot:slider.slot,
+            Planned_Delivery_Slot: slider.slot,
           },
           types: {
             Key: 'INT64',
             day: 'STRING',
             duration: 'INT64',
-            Planned_Delivery_Slot:'STRING',
+            Planned_Delivery_Slot: 'STRING',
           },
         };
       } else {
-        // Insert new slider record
         return {
           query: `INSERT INTO \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\` (Key, day, duration,Planned_Delivery_Slot) VALUES (@Key, @day, @duration,@Planned_Delivery_Slot)`,
           params: {
             Key: Number(Key),
             day: slider.day,
             duration: Number(slider.duration),
-            Planned_Delivery_Slot:slider.slot
+            Planned_Delivery_Slot: slider.slot
           },
           types: {
             Key: 'INT64',
             day: 'STRING',
             duration: 'INT64',
-            Planned_Delivery_Slot:'STRING',
+            Planned_Delivery_Slot: 'STRING',
           },
         };
       }
     }));
 
-    // Execute each query (either an INSERT or UPDATE) based on the result
     await Promise.all(
       insertOrUpdateSliderQueries.map(async (queryOption) => {
         await bigQueryClient.createQueryJob(queryOption);
@@ -448,7 +420,7 @@ app.put('/api/data/:key', async (req, res) => {
 // Delete Task from BigQuery
 app.delete('/api/data/:deliveryCode', async (req, res) => {
   const { deliveryCode } = req.params;
-  console.log("hi",req.params)
+  console.log("hi", req.params)
   const query = `
     DELETE FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
     WHERE DelCode_w_o__ = @deliveryCode
