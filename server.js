@@ -1,18 +1,16 @@
 const express = require('express');
 const { BigQuery } = require('@google-cloud/bigquery');
 const cors = require('cors');
-const path = require('path'); // Path is no longer strictly needed for BigQuery init, but kept as it might be used elsewhere
+const path = require('path');
 const dotenv = require('dotenv');
 
 dotenv.config();
 
 const projectId = process.env.GOOGLE_PROJECT_ID;
-// const keyFilePath = path.join(__dirname, process.env.GOOGLE_KEY_FILE); // This line is no longer needed and should be removed or commented out
 const bigQueryDataset = process.env.BIGQUERY_DATASET;
 const bigQueryTable = process.env.BIGQUERY_TABLE;
 const bigQueryTable2 = "Per_Key_Per_Day";
 const bigQueryTable3 = "Per_Person_Per_Day";
-
 
 const app = express();
 
@@ -20,81 +18,88 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Security headers to enable COOP and COEP
-//app.use((req, res, next) => {
-  //res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
-  //res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
-  //next();
-//});
-
 // --- IMPORTANT CHANGE HERE: BigQuery client initialization using environment variables ---
-
-// --- ADDED THESE LINES FOR DEBUGGING ---
 console.log('DEBUG: GOOGLE_PROJECT_ID:', process.env.GOOGLE_PROJECT_ID);
 console.log('DEBUG: BIGQUERY_CLIENT_EMAIL:', process.env.BIGQUERY_CLIENT_EMAIL);
-console.log('DEBUG: BIGQUERY_PRIVATE_KEY exists:', !!process.env.BIGQUERY_PRIVATE_KEY); // Checks if it's truthy
+console.log('DEBUG: BIGQUERY_PRIVATE_KEY exists:', !!process.env.BIGQUERY_PRIVATE_KEY);
 if (process.env.BIGQUERY_PRIVATE_KEY) {
   console.log('DEBUG: First 50 chars of private key:', process.env.BIGQUERY_PRIVATE_KEY.substring(0, 50));
   console.log('DEBUG: Last 50 chars of private key:', process.env.BIGQUERY_PRIVATE_KEY.slice(-50));
   console.log('DEBUG: Private key contains \\n:', process.env.BIGQUERY_PRIVATE_KEY.includes('\\n'));
 }
-// --- END DEBUGGING LINES ---
 
 const bigQueryClient = new BigQuery({
   projectId: process.env.GOOGLE_PROJECT_ID,
   credentials: {
     client_email: process.env.BIGQUERY_CLIENT_EMAIL,
-    // The private key from env var might have escaped newlines, so replace them
     private_key: process.env.BIGQUERY_PRIVATE_KEY?.replace(/\\n/g, '\n'),
   },
-  scopes: ['https://www.googleapis.com/auth/bigquery'], // More appropriate scope for BigQuery operations
+  scopes: ['https://www.googleapis.com/auth/bigquery'],
 });
 // --- END IMPORTANT CHANGE ---
 
+---
 
-// Duplicate middleware setup, keeping only one for clarity
-// app.use(cors()); // Already declared above
-// app.use(express.json()); // Already declared above
+## Refined `/api/data` Endpoint
 
+The primary change is in how the `email` query parameter is handled. We'll **split the incoming email string by commas and then trim any whitespace** from each resulting email. This ensures that whether a single email or multiple comma-separated emails are provided, we process them individually and correctly. The `REGEXP_CONTAINS` will then be run for **each** of these emails, effectively creating an `OR` condition for matching.
 
+```javascript
 app.get('/api/data', async (req, res) => {
   try {
-    // Get limit, offset, and email from query parameters
-    const limit = parseInt(req.query.limit, 500) || 500; // default to 10 rows
-    const offset = parseInt(req.query.offset, 500) || 0; // default to start at the beginning
-    const email = req.query.email; // email from query parameters
+    const limit = parseInt(req.query.limit, 10) || 500; // radix 10 for parseInt
+    const offset = parseInt(req.query.offset, 10) || 0; // radix 10 for parseInt
+    const rawEmailParam = req.query.email; // The raw email string from query parameters
 
-    // Ensure email is provided
-    if (!email) {
+    if (!rawEmailParam) {
       return res.status(400).json({ message: 'Email is required' });
     }
-    const query = `
-      SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\` 
-WHERE 
-    REGEXP_CONTAINS(Email, CONCAT('(^|[[:space:],])', @email, '([[:space:],]|$)')) 
-    AND (
-        (Planned_Start_Timestamp IS NULL AND Planned_Delivery_Timestamp IS NULL) 
-        OR 
-        (Step_ID = 0 AND Planned_Start_Timestamp IS NOT NULL AND Planned_Delivery_Timestamp IS NOT NULL)
-        OR 
-        (Step_ID = 0 AND Planned_Start_Timestamp IS NOT NULL AND Planned_Delivery_Timestamp IS NULL)
-        OR 
-        (Step_ID = 0 AND Planned_Start_Timestamp IS NULL AND Planned_Delivery_Timestamp IS NOT NULL)
-    )
-ORDER BY DelCode_w_o__ 
-LIMIT @limit OFFSET @offset;
 
-        `;
+    // --- IMPORTANT: Process the incoming email parameter ---
+    // Split by comma and trim whitespace, then filter out any empty strings
+    const emailsToSearch = rawEmailParam.split(',').map(email => email.trim()).filter(email => email !== '');
+
+    if (emailsToSearch.length === 0) {
+      return res.status(400).json({ message: 'No valid email addresses provided.' });
+    }
+
+    // Construct the REGEXP_CONTAINS conditions for each email
+    const emailConditions = emailsToSearch.map(email =>
+      `REGEXP_CONTAINS(Email, CONCAT('(^|[[:space:],])', @email_${emailsToSearch.indexOf(email)}, '([[:space:],]|$)'))`
+    ).join(' OR ');
+
+    // Prepare parameters for BigQuery
+    const params = { limit, offset };
+    emailsToSearch.forEach((email, index) => {
+      params[`email_${index}`] = email;
+    });
+    // --- END IMPORTANT PROCESSING ---
+
+    const query = `
+      SELECT * FROM \`<span class="math-inline">\{projectId\}\.</span>{bigQueryDataset}.${bigQueryTable}\`
+      WHERE
+        (${emailConditions})
+        AND (
+          (Planned_Start_Timestamp IS NULL AND Planned_Delivery_Timestamp IS NULL)
+          OR
+          (Step_ID = 0 AND Planned_Start_Timestamp IS NOT NULL AND Planned_Delivery_Timestamp IS NOT NULL)
+          OR
+          (Step_ID = 0 AND Planned_Start_Timestamp IS NOT NULL AND Planned_Delivery_Timestamp IS NULL)
+          OR
+          (Step_ID = 0 AND Planned_Start_Timestamp IS NULL AND Planned_Delivery_Timestamp IS NOT NULL)
+        )
+      ORDER BY DelCode_w_o__
+      LIMIT @limit OFFSET @offset;
+    `;
+
     const options = {
-      
       query: query,
-      params: { limit, offset, email },
+      params: params, // Use the dynamically constructed params
     };
 
     const [rows] = await bigQueryClient.query(options);
     console.log('Data fetched from BigQuery:', rows);
 
-    // Group the data by DelCode_w_o__
     const groupedData = rows.reduce((acc, item) => {
       const key = item.DelCode_w_o__;
       if (!acc[key]) {
@@ -110,78 +115,6 @@ LIMIT @limit OFFSET @offset;
     res.status(500).json({ message: err.message, stack: err.stack });
   }
 });
-
-// The commented out app.get('/api/data') block below is preserved for your reference if you need to uncomment it.
-// app.get('/api/data', async (req, res) => {
-//    try {
-//      // Get limit, offset, and email from query parameters
-//      const limit = parseInt(req.query.limit, 500) || 500; // default to 500 rows
-//      const offset = parseInt(req.query.offset, 500) || 0; // default to start at the beginning
-//      const email = req.query.email; // email from query parameters
-
-//      // Ensure email is provided
-//      if (!email) {
-//        return res.status(400).json({ message: 'Email is required' });
-//      }
-
-//      // Define additional emails for special user
-//      const additionalEmails = [
-//        'archana.l@brightbraintech.com',
-//        'sarthak.c@brightbraintech.com'
-//      ];
-
-//      // Build the query conditionally based on the email
-//      let emailCondition;
-//      if (email === 'meghna.j@brightbrain.com') {
-//        // Include tasks for the additional emails if email matches meghna.j
-//        const emailList = [`'${email}'`, ...additionalEmails.map(e => `'${e}'`)].join(',');
-//        emailCondition = `Email IN (${emailList})`;
-//      } else {
-//        // Regular email filtering
-//        emailCondition = `REGEXP_CONTAINS(Email, CONCAT('(^|[[:space:],])', @email, '([[:space:],]|$)'))`;
-//      }
-
-//      const query = `
-//        SELECT * //        FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\` 
-//        WHERE 
-//            ${emailCondition} 
-//            AND (
-//                (Planned_Start_Timestamp IS NULL AND Planned_Delivery_Timestamp IS NULL) 
-//                OR 
-//                (Step_ID = 0 AND Planned_Start_Timestamp IS NOT NULL AND Planned_Delivery_Timestamp IS NOT NULL)
-//                OR 
-//                (Step_ID = 0 AND Planned_Start_Timestamp IS NOT NULL AND Planned_Delivery_Timestamp IS NULL)
-//                OR 
-//                (Step_ID = 0 AND Planned_Start_Timestamp IS NULL AND Planned_Delivery_Timestamp IS NOT NULL)
-//            )
-//        ORDER BY DelCode_w_o__ 
-//        LIMIT @limit OFFSET @offset;
-//      `;
-
-//      const options = {
-//        query: query,
-//        params: { limit, offset, email },
-//      };
-
-//      const [rows] = await bigQueryClient.query(options);
-//      console.log('Data fetched from BigQuery:', rows);
-
-//      // Group the data by DelCode_w_o__
-//      const groupedData = rows.reduce((acc, item) => {
-//        const key = item.DelCode_w_o__;
-//        if (!acc[key]) {
-//          acc[key] = [];
-//        }
-//        acc[key].push(item);
-//        return acc;
-//      }, {});
-
-//      res.status(200).json(groupedData);
-//    } catch (err) {
-//      console.error('Error querying BigQuery:', err.message, err.stack);
-//      res.status(500).json({ message: err.message, stack: err.stack });
-//    }
-// });
 
 
 
