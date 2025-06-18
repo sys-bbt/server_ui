@@ -58,7 +58,7 @@ app.get('/api/data', async (req, res) => {
 
     // Construct the REGEXP_CONTAINS conditions for each email
     const emailConditions = emailsToSearch.map(email =>
-      `REGEXP_CONTAINS(Email, CONCAT('(^|[[:space:],])', @email_${emailsToSearch.indexOf(email)}, '([[:space:],]|$)'))`
+      `REGEXP_CONTAINS(Emails, CONCAT('(^|[[:space:],])', @email_${emailsToSearch.indexOf(email)}, '([[:space:],]|$)'))`
     ).join(' OR ');
 
     // Prepare parameters for BigQuery
@@ -164,6 +164,7 @@ app.post('/api/post', async (req, res) => {
     Responsibility,
     Current_Status,
     Email,
+    Emails,
     Total_Tasks,
     Completed_Tasks,
     Planned_Tasks,
@@ -205,6 +206,7 @@ app.post('/api/post', async (req, res) => {
         Responsibility = @Responsibility,
         Current_Status = @Current_Status,
         Email = @Email,
+        Emails = @Emails,
         Total_Tasks = @Total_Tasks,
         Completed_Tasks = @Completed_Tasks,
         Planned_Tasks = @Planned_Tasks,
@@ -232,6 +234,7 @@ app.post('/api/post', async (req, res) => {
           Responsibility,
           Current_Status,
           Email,
+          Emails,
           Total_Tasks,
           Completed_Tasks,
           Planned_Tasks,
@@ -255,6 +258,7 @@ app.post('/api/post', async (req, res) => {
           Responsibility: 'STRING',
           Current_Status: 'STRING',
           Email: 'STRING',
+          Emails: 'STRING',
           Total_Tasks: 'INT64',
           Completed_Tasks: 'INT64',
           Planned_Tasks: 'INT64',
@@ -287,6 +291,7 @@ app.post('/api/post', async (req, res) => {
           Responsibility,
           Current_Status,
           Email,
+          Emails,
           Total_Tasks,
           Completed_Tasks,
           Planned_Tasks,
@@ -310,6 +315,7 @@ app.post('/api/post', async (req, res) => {
           Responsibility: 'STRING',
           Current_Status: 'STRING',
           Email: 'STRING',
+          Emails: 'STRING',
           Total_Tasks: 'INT64',
           Completed_Tasks: 'INT64',
           Planned_Tasks: 'INT64',
