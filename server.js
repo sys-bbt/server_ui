@@ -33,10 +33,11 @@ const bigQueryClient = new BigQuery({
         client_email: process.env.BIGQUERY_CLIENT_EMAIL,
         private_key: process.env.BIGQUERY_PRIVATE_KEY?.replace(/\\n/g, '\n'),
     },
-    scopes: ['https://www.googleapis.com/auth/bigquery'],
+    scopes: ['[https://www.googleapis.com/auth/bigquery](https://www.googleapis.com/auth/bigquery)'],
 });
 
 const ADMIN_EMAILS_BACKEND = [
+    "systems@brightbraintech.com",
     "neelam.p@brightbraintech.com",
     "meghna.j@brightbraintech.com",
     "zoya.a@brightbraintech.com",
@@ -67,7 +68,8 @@ app.get('/api/data', async (req, res) => {
     try {
         const limit = parseInt(req.query.limit, 10) || 500;
         const offset = parseInt(req.query.offset, 10) || 0;
-        const rawEmailParam = req.query.email;
+        // Convert rawEmailParam to lowercase at the very beginning for consistency
+        const rawEmailParam = req.query.email ? req.query.email.toLowerCase() : null; 
         const requestedDelCode = req.query.delCode;
         
         const isAdminRequest = ADMIN_EMAILS_BACKEND.includes(rawEmailParam);
@@ -94,6 +96,7 @@ app.get('/api/data', async (req, res) => {
                     params: delCodeParams,
                 };
                 [rows] = await bigQueryClient.query(options);
+                console.log(`Backend /api/data (Detail View - Admin): Fetched ${rows.length} rows for delCode ${requestedDelCode}.`);
             } else {
                 // Non-admins: Always get Step_ID=0 + their assigned tasks for this delCode
                 
@@ -104,16 +107,19 @@ app.get('/api/data', async (req, res) => {
                     params: delCodeParams,
                 };
                 const [rowsStep0] = await bigQueryClient.query(optionsStep0);
+                console.log(`Backend /api/data (Detail View - Non-Admin): Fetched ${rowsStep0.length} Step_ID=0 row(s) for delCode ${requestedDelCode}.`);
+
 
                 // Query 2: Get all tasks (Step_ID != 0) for this delCode assigned to the user
-                const emailsToSearch = rawEmailParam.split(',').map(email => email.trim()).filter(email => email !== '');
+                const emailsToSearch = rawEmailParam.split(',').map(email => email.trim().toLowerCase()).filter(email => email !== ''); // Already lowercase
                 let queryTasks = '';
                 let paramsTasks = { requestedDelCode: requestedDelCode };
 
                 if (emailsToSearch.length > 0) {
                     const emailConditions = emailsToSearch.map((email, index) => {
                         paramsTasks[`email_${index}`] = email;
-                        return `REGEXP_CONTAINS(Emails, CONCAT('(^|[[:space:],])', @email_${index}, '([[:space:],]|$)'))`;
+                        // Convert Emails field to lowercase in BigQuery for comparison
+                        return `REGEXP_CONTAINS(LOWER(Emails), CONCAT('(^|[[:space:],])', @email_${index}, '([[:space:],]|$)'))`;
                     }).join(' OR ');
                     
                     queryTasks = `${baseQuery} WHERE DelCode_w_o__ = @requestedDelCode AND Step_ID != 0 AND (${emailConditions});`;
@@ -123,16 +129,17 @@ app.get('/api/data', async (req, res) => {
                         params: paramsTasks,
                     };
                     const [rowsTasks] = await bigQueryClient.query(optionsTasks);
+                    console.log(`Backend /api/data (Detail View - Non-Admin): Fetched ${rowsTasks.length} assigned task row(s) for delCode ${requestedDelCode}.`);
                     rows = [...rowsStep0, ...rowsTasks]; // Combine Step_ID=0 and assigned tasks
                 } else {
                     // If no valid email for non-admin, just return Step_ID=0 (if it exists)
                     rows = rowsStep0;
+                    console.log(`Backend /api/data (Detail View - Non-Admin): No valid email for tasks, returned ${rows.length} Step_ID=0 row(s).`);
                 }
             }
         } else {
-            // --- NEW LOGIC FOR DELIVERYLIST (non-admin) ---
-            // Non-admins: First find all DelCode_w_o__ where user's email is in any task (Step_ID 0 or != 0)
-            const emailsToSearch = rawEmailParam.split(',').map(email => email.trim()).filter(email => email !== '');
+            // Logic for DeliveryList page (no specific delCode requested)
+            const emailsToSearch = rawEmailParam.split(',').map(email => email.trim().toLowerCase()).filter(email => email !== ''); // Already lowercase
             let params = { limit, offset };
 
             if (!isAdminRequest) {
@@ -142,16 +149,18 @@ app.get('/api/data', async (req, res) => {
 
                 const emailConditions = emailsToSearch.map((email, index) => {
                     params[`email_${index}`] = email;
-                    return `REGEXP_CONTAINS(Emails, CONCAT('(^|[[:space:],])', @email_${index}, '([[:space:],]|$)'))`;
+                    // Convert Emails field to lowercase in BigQuery for comparison
+                    return `REGEXP_CONTAINS(LOWER(Emails), CONCAT('(^|[[:space:],])', @email_${index}, '([[:space:],]|$)'))`;
                 }).join(' OR ');
 
+                // Query to find relevant DelCodes
                 const findRelevantDelCodesQuery = `
                     SELECT DISTINCT DelCode_w_o__
                     FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
                     WHERE (${emailConditions})
                 `;
-                console.log('Query to find relevant DelCodes:', findRelevantDelCodesQuery);
-                console.log('Params for DelCode query:', params);
+                console.log('Backend /api/data (List View - Non-Admin): Query to find relevant DelCodes:', findRelevantDelCodesQuery);
+                console.log('Backend /api/data (List View - Non-Admin): Params for DelCode query:', params);
 
                 const [relevantDelCodesRows] = await bigQueryClient.query({
                     query: findRelevantDelCodesQuery,
@@ -159,10 +168,11 @@ app.get('/api/data', async (req, res) => {
                 });
 
                 const relevantDelCodes = relevantDelCodesRows.map(row => row.DelCode_w_o__);
-                
+                console.log(`Backend /api/data (List View - Non-Admin): Found ${relevantDelCodes.length} relevant DelCodes:`, relevantDelCodes);
+
                 if (relevantDelCodes.length === 0) {
                     rows = []; // No relevant workflows found
-                    console.log('No relevant DelCodes found for user.');
+                    console.log('Backend /api/data (List View - Non-Admin): No relevant DelCodes found for user, returning empty rows.');
                 } else {
                     // Now, fetch the Step_ID = 0 entry for each of these relevant DelCodes
                     const delCodePlaceholders = relevantDelCodes.map((_, i) => `@delCode_${i}`).join(',');
@@ -175,12 +185,13 @@ app.get('/api/data', async (req, res) => {
                         WHERE DelCode_w_o__ IN (${delCodePlaceholders}) AND Step_ID = 0
                         ORDER BY DelCode_w_o__ LIMIT @limit OFFSET @offset;
                     `;
-                    console.log('Query to fetch Step_ID=0 for relevant DelCodes:', fetchStep0ForRelevantDelCodesQuery);
-                    console.log('Params for Step_ID=0 query:', params);
+                    console.log('Backend /api/data (List View - Non-Admin): Query to fetch Step_ID=0 for relevant DelCodes:', fetchStep0ForRelevantDelCodesQuery);
+                    console.log('Backend /api/data (List View - Non-Admin): Params for Step_ID=0 query:', params);
                     [rows] = await bigQueryClient.query({
                         query: fetchStep0ForRelevantDelCodesQuery,
                         params: params
                     });
+                    console.log(`Backend /api/data (List View - Non-Admin): Fetched ${rows.length} Step_ID=0 rows after filtering by relevant DelCodes. Raw rows:`, rows); // Log raw rows
                 }
             } else { // Admin logic for DeliveryList page (no specific delCode)
                 let whereClauses = [];
@@ -200,10 +211,11 @@ app.get('/api/data', async (req, res) => {
                 query += ` ORDER BY DelCode_w_o__ LIMIT @limit OFFSET @offset;`;
                 const options = { query: query, params: params };
                 [rows] = await bigQueryClient.query(options);
+                console.log(`Backend /api/data (List View - Admin): Fetched ${rows.length} Step_ID=0 rows. Raw rows:`, rows); // Log raw rows
             }
         }
 
-        console.log('Data fetched from BigQuery (raw):', rows.length);
+        console.log('Backend /api/data: Final raw rows fetched before grouping:', rows.length);
 
         const groupedData = rows.reduce((acc, item) => {
             const key = item.DelCode_w_o__;
@@ -214,7 +226,7 @@ app.get('/api/data', async (req, res) => {
             return acc;
         }, {});
 
-        console.log('Data fetched from BigQuery (grouped keys):', Object.keys(groupedData));
+        console.log('Backend /api/data: Final grouped data keys sent to frontend:', Object.keys(groupedData));
         res.status(200).json(groupedData);
     } catch (err) {
         console.error('Error querying BigQuery in /api/data:', err.message, err.stack);
@@ -222,7 +234,6 @@ app.get('/api/data', async (req, res) => {
     }
 });
 
-// Route to get data from the Per_Key_Per_Day table with summed Duration
 app.get('/api/per-key-per-day', async (req, res) => {
     try {
         const query = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\``;
@@ -246,7 +257,6 @@ app.get('/api/per-key-per-day', async (req, res) => {
     }
 });
 
-// Route to get data from the Per_Person_Per_Day table with summed Duration
 app.get('/api/per-person-per-day', async (req, res) => {
     try {
         const query = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable3}\``;
