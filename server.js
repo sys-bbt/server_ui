@@ -25,7 +25,7 @@ console.log('DEBUG: BIGQUERY_PRIVATE_KEY exists:', !!process.env.BIGQUERY_PRIVAT
 if (process.env.BIGQUERY_PRIVATE_KEY) {
     console.log('DEBUG: First 50 chars of private key:', process.env.BIGQUERY_PRIVATE_KEY.substring(0, 50));
     console.log('DEBUG: Last 50 chars of private key:', process.env.BIGQUERY_PRIVATE_KEY.slice(-50));
-    console.log('DEBUG: Private key contains \\n:', process.env.env.BIGQUERY_PRIVATE_KEY.includes('\\n'));
+    console.log('DEBUG: Private key contains \\n:', process.env.BIGQUERY_PRIVATE_KEY.includes('\\n'));
 }
 
 const bigQueryClient = new BigQuery({
