@@ -40,7 +40,6 @@ const bigQueryClient = new BigQuery({
 
 // Define admin emails on the backend for server-side verification
 const ADMIN_EMAILS_BACKEND = [
-    "systems@brightbraintech.com",
     "neelam.p@brightbraintech.com",
     "meghna.j@brightbraintech.com",
     "zoya.a@brightbraintech.com",
