@@ -18,7 +18,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// --- IMPORTANT CHANGE HERE: BigQuery client initialization using environment variables ---
 console.log('DEBUG: GOOGLE_PROJECT_ID:', process.env.GOOGLE_PROJECT_ID);
 console.log('DEBUG: BIGQUERY_CLIENT_EMAIL:', process.env.BIGQUERY_CLIENT_EMAIL);
 console.log('DEBUG: BIGQUERY_PRIVATE_KEY exists:', !!process.env.BIGQUERY_PRIVATE_KEY);
@@ -36,9 +35,7 @@ const bigQueryClient = new BigQuery({
     },
     scopes: ['https://www.googleapis.com/auth/bigquery'],
 });
-// --- END IMPORTANT CHANGE ---
 
-// Define admin emails on the backend for server-side verification
 const ADMIN_EMAILS_BACKEND = [
     "neelam.p@brightbraintech.com",
     "meghna.j@brightbraintech.com",
@@ -47,22 +44,16 @@ const ADMIN_EMAILS_BACKEND = [
     "hitesh.r@brightbraintech.com"
 ];
 
-// New API endpoint to fetch distinct persons from BigQuery
 app.get('/api/persons', async (req, res) => {
     try {
-        // Query to get distinct Responsibility names from your main task table
         const query = `
             SELECT DISTINCT Responsibility
             FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
             WHERE Responsibility IS NOT NULL AND Responsibility != ''
             ORDER BY Responsibility;
         `;
-
         const [rows] = await bigQueryClient.query(query);
-
-        // Extract just the responsibility names into an array
         const persons = rows.map(row => row.Responsibility);
-
         console.log('Fetched distinct persons from BigQuery:', persons);
         res.status(200).json(persons);
     } catch (err) {
@@ -99,7 +90,7 @@ app.get('/api/data', async (req, res) => {
             if (isAdminRequest) {
                 // Admins see all tasks for the requested delCode
                 const options = {
-                    query: `${baseQuery} ${delCodeWhereClause} ORDER BY Step_ID ASC;`, // Order by Step_ID to ensure Step_ID=0 is first
+                    query: `${baseQuery} ${delCodeWhereClause} ORDER BY Step_ID ASC;`,
                     params: delCodeParams,
                 };
                 [rows] = await bigQueryClient.query(options);
@@ -139,49 +130,77 @@ app.get('/api/data', async (req, res) => {
                 }
             }
         } else {
-            // Logic for DeliveryList page (no specific delCode requested)
-            let whereClauses = [];
+            // --- NEW LOGIC FOR DELIVERYLIST (non-admin) ---
+            // Non-admins: First find all DelCode_w_o__ where user's email is in any task (Step_ID 0 or != 0)
+            const emailsToSearch = rawEmailParam.split(',').map(email => email.trim()).filter(email => email !== '');
             let params = { limit, offset };
 
-            if (isAdminRequest) {
-                // Admins get all Step_ID=0 entries
-                whereClauses.push(`Step_ID = 0`);
-            } else {
-                // Non-admins get Step_ID=0 entries only if their email is in the Emails field
-                const emailsToSearch = rawEmailParam.split(',').map(email => email.trim()).filter(email => email !== '');
+            if (!isAdminRequest) {
                 if (emailsToSearch.length === 0) {
-                     return res.status(400).json({ message: 'No valid email addresses provided for non-admin request.' });
+                    return res.status(400).json({ message: 'No valid email addresses provided for non-admin request.' });
                 }
+
                 const emailConditions = emailsToSearch.map((email, index) => {
                     params[`email_${index}`] = email;
                     return `REGEXP_CONTAINS(Emails, CONCAT('(^|[[:space:],])', @email_${index}, '([[:space:],]|$)'))`;
                 }).join(' OR ');
-                whereClauses.push(`Step_ID = 0 AND (${emailConditions})`);
+
+                const findRelevantDelCodesQuery = `
+                    SELECT DISTINCT DelCode_w_o__
+                    FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
+                    WHERE (${emailConditions})
+                `;
+                console.log('Query to find relevant DelCodes:', findRelevantDelCodesQuery);
+                console.log('Params for DelCode query:', params);
+
+                const [relevantDelCodesRows] = await bigQueryClient.query({
+                    query: findRelevantDelCodesQuery,
+                    params: params
+                });
+
+                const relevantDelCodes = relevantDelCodesRows.map(row => row.DelCode_w_o__);
+                
+                if (relevantDelCodes.length === 0) {
+                    rows = []; // No relevant workflows found
+                    console.log('No relevant DelCodes found for user.');
+                } else {
+                    // Now, fetch the Step_ID = 0 entry for each of these relevant DelCodes
+                    const delCodePlaceholders = relevantDelCodes.map((_, i) => `@delCode_${i}`).join(',');
+                    relevantDelCodes.forEach((code, i) => {
+                        params[`delCode_${i}`] = code;
+                    });
+
+                    const fetchStep0ForRelevantDelCodesQuery = `
+                        ${baseQuery}
+                        WHERE DelCode_w_o__ IN (${delCodePlaceholders}) AND Step_ID = 0
+                        ORDER BY DelCode_w_o__ LIMIT @limit OFFSET @offset;
+                    `;
+                    console.log('Query to fetch Step_ID=0 for relevant DelCodes:', fetchStep0ForRelevantDelCodesQuery);
+                    console.log('Params for Step_ID=0 query:', params);
+                    [rows] = await bigQueryClient.query({
+                        query: fetchStep0ForRelevantDelCodesQuery,
+                        params: params
+                    });
+                }
+            } else { // Admin logic for DeliveryList page (no specific delCode)
+                let whereClauses = [];
+                whereClauses.push(`Step_ID = 0`);
+                 // Add planned timestamp condition for admins as well for DeliveryList
+                whereClauses.push(`(
+                    (Planned_Start_Timestamp IS NULL AND Planned_Delivery_Timestamp IS NULL)
+                    OR
+                    (Planned_Start_Timestamp IS NOT NULL AND Planned_Delivery_Timestamp IS NOT NULL)
+                    OR
+                    (Planned_Start_Timestamp IS NOT NULL AND Planned_Delivery_Timestamp IS NULL)
+                    OR
+                    (Planned_Start_Timestamp IS NULL AND Planned_Delivery_Timestamp IS NOT NULL)
+                )`);
+
+                let query = `${baseQuery} WHERE ` + whereClauses.join(' AND ');
+                query += ` ORDER BY DelCode_w_o__ LIMIT @limit OFFSET @offset;`;
+                const options = { query: query, params: params };
+                [rows] = await bigQueryClient.query(options);
             }
-            
-            // Add planned timestamp condition for both cases (admins and non-admins)
-            whereClauses.push(`(
-                (Planned_Start_Timestamp IS NULL AND Planned_Delivery_Timestamp IS NULL)
-                OR
-                (Step_ID = 0 AND Planned_Start_Timestamp IS NOT NULL AND Planned_Delivery_Timestamp IS NOT NULL)
-                OR
-                (Step_ID = 0 AND Planned_Start_Timestamp IS NOT NULL AND Planned_Delivery_Timestamp IS NULL)
-                OR
-                (Step_ID = 0 AND Planned_Start_Timestamp IS NULL AND Planned_Delivery_Timestamp IS NOT NULL)
-            )`);
-
-
-            if (whereClauses.length > 0) {
-                query = `${baseQuery} WHERE ` + whereClauses.join(' AND ');
-            }
-
-            query += ` ORDER BY DelCode_w_o__ LIMIT @limit OFFSET @offset;`;
-            
-            const options = {
-                query: query,
-                params: params,
-            };
-            [rows] = await bigQueryClient.query(options);
         }
 
         console.log('Data fetched from BigQuery (raw):', rows.length);
@@ -209,7 +228,6 @@ app.get('/api/per-key-per-day', async (req, res) => {
         const query = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\``;
         const [rows] = await bigQueryClient.query(query);
 
-        // Group the data by Key and sum the Duration
         const groupedData = rows.reduce((acc, item) => {
             const key = item.Key;
             if (!acc[key]) {
@@ -242,7 +260,6 @@ app.get('/api/per-person-per-day', async (req, res) => {
     }
 });
 
-// post req
 app.post('/api/post', async (req, res) => {
     const {
         Key,
@@ -254,7 +271,7 @@ app.post('/api/post', async (req, res) => {
         Client,
         Short_Description,
         Planned_Start_Timestamp,
-        Selected_Planned_Start_Timestamp, // This variable is not used anywhere in the current post request so adding a new variable
+        Selected_Planned_Start_Timestamp,
         Planned_Delivery_Timestamp,
         Responsibility,
         Current_Status,
@@ -405,7 +422,7 @@ app.post('/api/post', async (req, res) => {
                     Frequency___Timeline: 'STRING',
                     Client: 'STRING',
                     Short_Description: 'STRING',
-                    DUMMY_Start_Timestamp: 'TIMESTAMP', // Corrected type for Planned_Start_Timestamp
+                    Planned_Start_Timestamp: 'TIMESTAMP',
                     Planned_Delivery_Timestamp: 'TIMESTAMP',
                     Responsibility: 'STRING',
                     Current_Status: 'STRING',
