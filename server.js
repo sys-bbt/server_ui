@@ -33,11 +33,11 @@ const bigQueryClient = new BigQuery({
         client_email: process.env.BIGQUERY_CLIENT_EMAIL,
         private_key: process.env.BIGQUERY_PRIVATE_KEY?.replace(/\\n/g, '\n'),
     },
-    scopes: ['[https://www.googleapis.com/auth/bigquery](https://www.googleapis.com/auth/bigquery)'],
+    // FIX: Corrected the scope string format
+    scopes: ['https://www.googleapis.com/auth/bigquery'],
 });
 
 const ADMIN_EMAILS_BACKEND = [
-    "systems@brightbraintech.com",
     "neelam.p@brightbraintech.com",
     "meghna.j@brightbraintech.com",
     "zoya.a@brightbraintech.com",
