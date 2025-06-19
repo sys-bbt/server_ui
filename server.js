@@ -38,12 +38,20 @@ const bigQueryClient = new BigQuery({
 });
 // --- END IMPORTANT CHANGE ---
 
+// Define admin emails on the backend for server-side verification
+const ADMIN_EMAILS_BACKEND = [
+    "systems@brightbraintech.com",
+    "neelam.p@brightbraintech.com",
+    "meghna.j@brightbraintech.com",
+    "zoya.a@brightbraintech.com",
+    "shweta.g@brightbraintech.com",
+    "hitesh.r@brightbraintech.com"
+];
+
 // New API endpoint to fetch distinct persons from BigQuery
 app.get('/api/persons', async (req, res) => {
     try {
         // Query to get distinct Responsibility names from your main task table
-        // This assumes that the 'Responsibility' column in your main table
-        // (bigQueryTable) contains the names of the team members.
         const query = `
             SELECT DISTINCT Responsibility
             FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
@@ -67,59 +75,100 @@ app.get('/api/persons', async (req, res) => {
 
 app.get('/api/data', async (req, res) => {
     try {
-        const limit = parseInt(req.query.limit, 10) || 500; // radix 10 for parseInt
-        const offset = parseInt(req.query.offset, 10) || 0; // radix 10 for parseInt
-        const rawEmailParam = req.query.email; // The raw email string from query parameters
+        const limit = parseInt(req.query.limit, 10) || 500;
+        const offset = parseInt(req.query.offset, 10) || 0;
+        const rawEmailParam = req.query.email;
+        const requestedDelCode = req.query.delCode; // NEW: Get delCode from query
+        
+        // Determine if the requesting user is an admin
+        const isAdminRequest = ADMIN_EMAILS_BACKEND.includes(rawEmailParam);
+        console.log(`Backend /api/data: Request from ${rawEmailParam}, isAdminRequest: ${isAdminRequest}`);
+        console.log(`Backend /api/data: Requested delCode: ${requestedDelCode}`);
 
-        if (!rawEmailParam) {
-            return res.status(400).json({ message: 'Email is required' });
+
+        if (!rawEmailParam && !isAdminRequest) { // Only require email if not an admin request
+            return res.status(400).json({ message: 'Email is required for non-admin requests' });
         }
 
-        // --- IMPORTANT: Process the incoming email parameter ---
-        // Split by comma and trim whitespace, then filter out any empty strings
-        const emailsToSearch = rawEmailParam.split(',').map(email => email.trim()).filter(email => email !== '');
+        let query = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\` `;
+        let whereClauses = [];
+        let params = { limit, offset };
 
-        if (emailsToSearch.length === 0) {
-            return res.status(400).json({ message: 'No valid email addresses provided.' });
+        // If a specific delCode is requested (for DeliveryDetail page)
+        if (requestedDelCode) {
+            whereClauses.push(`DelCode_w_o__ = @requestedDelCode`);
+            params.requestedDelCode = requestedDelCode;
+            // When a specific delCode is requested, admins see all tasks for that delCode,
+            // non-admins see only tasks assigned to them within that delCode.
+            if (!isAdminRequest) {
+                const emailsToSearch = rawEmailParam.split(',').map(email => email.trim()).filter(email => email !== '');
+                if (emailsToSearch.length > 0) {
+                    const emailConditions = emailsToSearch.map((email, index) => {
+                        params[`email_${index}`] = email;
+                        return `REGEXP_CONTAINS(Emails, CONCAT('(^|[[:space:],])', @email_${index}, '([[:space:],]|$)'))`;
+                    }).join(' OR ');
+                    whereClauses.push(`(${emailConditions})`);
+                }
+            }
+        } else {
+            // For the DeliveryList page (no specific delCode requested)
+            // Admins get all Step_ID=0 entries
+            if (isAdminRequest) {
+                whereClauses.push(`Step_ID = 0`);
+            } else {
+                // Non-admins get Step_ID=0 entries only if their email is in the Emails field
+                const emailsToSearch = rawEmailParam.split(',').map(email => email.trim()).filter(email => email !== '');
+                if (emailsToSearch.length === 0) {
+                     return res.status(400).json({ message: 'No valid email addresses provided for non-admin request.' });
+                }
+                const emailConditions = emailsToSearch.map((email, index) => {
+                    params[`email_${index}`] = email;
+                    return `REGEXP_CONTAINS(Emails, CONCAT('(^|[[:space:],])', @email_${index}, '([[:space:],]|$)'))`;
+                }).join(' OR ');
+                whereClauses.push(`Step_ID = 0 AND (${emailConditions})`);
+            }
+        }
+        
+        // Add planned timestamp condition for both cases (admins and non-admins)
+        // This condition ensures that tasks with specific planned timestamps are included,
+        // and also tasks without planned timestamps are included.
+        // It allows Step_ID=0 or Step_ID!=0 tasks to be returned if they don't have planned timestamps
+        // or if they have Step_ID=0 and valid planned timestamps.
+        whereClauses.push(`(
+            (Planned_Start_Timestamp IS NULL AND Planned_Delivery_Timestamp IS NULL)
+            OR
+            (Step_ID = 0 AND Planned_Start_Timestamp IS NOT NULL AND Planned_Delivery_Timestamp IS NOT NULL)
+            OR
+            (Step_ID = 0 AND Planned_Start_Timestamp IS NOT NULL AND Planned_Delivery_Timestamp IS NULL)
+            OR
+            (Step_ID = 0 AND Planned_Start_Timestamp IS NULL AND Planned_Delivery_Timestamp IS NOT NULL)
+            OR
+            (Step_ID != 0 AND Planned_Start_Timestamp IS NOT NULL AND Planned_Delivery_Timestamp IS NOT NULL)
+            OR
+            (Step_ID != 0 AND Planned_Start_Timestamp IS NOT NULL AND Planned_Delivery_Timestamp IS NULL)
+            OR
+            (Step_ID != 0 AND Planned_Start_Timestamp IS NULL AND Planned_Delivery_Timestamp IS NOT NULL)
+        )`);
+
+
+        if (whereClauses.length > 0) {
+            query += ` WHERE ` + whereClauses.join(' AND ');
         }
 
-        // Construct the REGEXP_CONTAINS conditions for each email
-        const emailConditions = emailsToSearch.map(email =>
-            `REGEXP_CONTAINS(Emails, CONCAT('(^|[[:space:],])', @email_${emailsToSearch.indexOf(email)}, '([[:space:],]|$)'))`
-        ).join(' OR ');
-
-        // Prepare parameters for BigQuery
-        const params = { limit, offset };
-        emailsToSearch.forEach((email, index) => {
-            params[`email_${index}`] = email;
-        });
-        // --- END IMPORTANT PROCESSING ---
-
-        const query = `
-            SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
-            WHERE
-                (${emailConditions})
-                AND (
-                    (Planned_Start_Timestamp IS NULL AND Planned_Delivery_Timestamp IS NULL)
-                    OR
-                    (Step_ID = 0 AND Planned_Start_Timestamp IS NOT NULL AND Planned_Delivery_Timestamp IS NOT NULL)
-                    OR
-                    (Step_ID = 0 AND Planned_Start_Timestamp IS NOT NULL AND Planned_Delivery_Timestamp IS NULL)
-                    OR
-                    (Step_ID = 0 AND Planned_Start_Timestamp IS NULL AND Planned_Delivery_Timestamp IS NOT NULL)
-                )
-            ORDER BY DelCode_w_o__
-            LIMIT @limit OFFSET @offset;
-        `;
+        query += ` ORDER BY DelCode_w_o__ LIMIT @limit OFFSET @offset;`;
 
         const options = {
             query: query,
-            params: params, // Use the dynamically constructed params
+            params: params,
         };
 
-        const [rows] = await bigQueryClient.query(options);
-        console.log('Data fetched from BigQuery:', rows);
+        console.log('BigQuery Query:', query);
+        console.log('BigQuery Params:', params);
 
+        const [rows] = await bigQueryClient.query(options);
+        console.log('Data fetched from BigQuery (raw):', rows.length); // Log number of rows
+
+        // Group the data by DelCode_w_o__ regardless of admin status
         const groupedData = rows.reduce((acc, item) => {
             const key = item.DelCode_w_o__;
             if (!acc[key]) {
@@ -129,9 +178,10 @@ app.get('/api/data', async (req, res) => {
             return acc;
         }, {});
 
+        console.log('Data fetched from BigQuery (grouped keys):', Object.keys(groupedData));
         res.status(200).json(groupedData);
     } catch (err) {
-        console.error('Error querying BigQuery:', err.message, err.stack);
+        console.error('Error querying BigQuery in /api/data:', err.message, err.stack);
         res.status(500).json({ message: err.message, stack: err.stack });
     }
 });
