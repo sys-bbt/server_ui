@@ -25,7 +25,7 @@ console.log('DEBUG: BIGQUERY_PRIVATE_KEY exists:', !!process.env.BIGQUERY_PRIVAT
 if (process.env.BIGQUERY_PRIVATE_KEY) {
     console.log('DEBUG: First 50 chars of private key:', process.env.BIGQUERY_PRIVATE_KEY.substring(0, 50));
     console.log('DEBUG: Last 50 chars of private key:', process.env.BIGQUERY_PRIVATE_KEY.slice(-50));
-    console.log('DEBUG: Private key contains \\n:', process.env.BIGQUERY_PRIVATE_KEY.includes('\\n'));
+    console.log('DEBUG: Private key contains \\n:', process.env.env.BIGQUERY_PRIVATE_KEY.includes('\\n'));
 }
 
 const bigQueryClient = new BigQuery({
@@ -77,42 +77,74 @@ app.get('/api/data', async (req, res) => {
         const limit = parseInt(req.query.limit, 10) || 500;
         const offset = parseInt(req.query.offset, 10) || 0;
         const rawEmailParam = req.query.email;
-        const requestedDelCode = req.query.delCode; // NEW: Get delCode from query
+        const requestedDelCode = req.query.delCode;
         
-        // Determine if the requesting user is an admin
         const isAdminRequest = ADMIN_EMAILS_BACKEND.includes(rawEmailParam);
         console.log(`Backend /api/data: Request from ${rawEmailParam}, isAdminRequest: ${isAdminRequest}`);
         console.log(`Backend /api/data: Requested delCode: ${requestedDelCode}`);
 
 
-        if (!rawEmailParam && !isAdminRequest) { // Only require email if not an admin request
+        if (!rawEmailParam && !isAdminRequest) {
             return res.status(400).json({ message: 'Email is required for non-admin requests' });
         }
 
-        let query = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\` `;
-        let whereClauses = [];
-        let params = { limit, offset };
+        let baseQuery = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\``;
+        let rows = [];
 
-        // If a specific delCode is requested (for DeliveryDetail page)
         if (requestedDelCode) {
-            whereClauses.push(`DelCode_w_o__ = @requestedDelCode`);
-            params.requestedDelCode = requestedDelCode;
-            // When a specific delCode is requested, admins see all tasks for that delCode,
-            // non-admins see only tasks assigned to them within that delCode.
-            if (!isAdminRequest) {
+            // Logic for DeliveryDetail page (specific delCode requested)
+            let delCodeWhereClause = `WHERE DelCode_w_o__ = @requestedDelCode`;
+            let delCodeParams = { requestedDelCode: requestedDelCode };
+
+            if (isAdminRequest) {
+                // Admins see all tasks for the requested delCode
+                const options = {
+                    query: `${baseQuery} ${delCodeWhereClause} ORDER BY Step_ID ASC;`, // Order by Step_ID to ensure Step_ID=0 is first
+                    params: delCodeParams,
+                };
+                [rows] = await bigQueryClient.query(options);
+            } else {
+                // Non-admins: Always get Step_ID=0 + their assigned tasks for this delCode
+                
+                // Query 1: Get the Step_ID=0 entry for this delCode (unconditionally)
+                const queryStep0 = `${baseQuery} WHERE DelCode_w_o__ = @requestedDelCode AND Step_ID = 0;`;
+                const optionsStep0 = {
+                    query: queryStep0,
+                    params: delCodeParams,
+                };
+                const [rowsStep0] = await bigQueryClient.query(optionsStep0);
+
+                // Query 2: Get all tasks (Step_ID != 0) for this delCode assigned to the user
                 const emailsToSearch = rawEmailParam.split(',').map(email => email.trim()).filter(email => email !== '');
+                let queryTasks = '';
+                let paramsTasks = { requestedDelCode: requestedDelCode };
+
                 if (emailsToSearch.length > 0) {
                     const emailConditions = emailsToSearch.map((email, index) => {
-                        params[`email_${index}`] = email;
+                        paramsTasks[`email_${index}`] = email;
                         return `REGEXP_CONTAINS(Emails, CONCAT('(^|[[:space:],])', @email_${index}, '([[:space:],]|$)'))`;
                     }).join(' OR ');
-                    whereClauses.push(`(${emailConditions})`);
+                    
+                    queryTasks = `${baseQuery} WHERE DelCode_w_o__ = @requestedDelCode AND Step_ID != 0 AND (${emailConditions});`;
+                    
+                    const optionsTasks = {
+                        query: queryTasks,
+                        params: paramsTasks,
+                    };
+                    const [rowsTasks] = await bigQueryClient.query(optionsTasks);
+                    rows = [...rowsStep0, ...rowsTasks]; // Combine Step_ID=0 and assigned tasks
+                } else {
+                    // If no valid email for non-admin, just return Step_ID=0 (if it exists)
+                    rows = rowsStep0;
                 }
             }
         } else {
-            // For the DeliveryList page (no specific delCode requested)
-            // Admins get all Step_ID=0 entries
+            // Logic for DeliveryList page (no specific delCode requested)
+            let whereClauses = [];
+            let params = { limit, offset };
+
             if (isAdminRequest) {
+                // Admins get all Step_ID=0 entries
                 whereClauses.push(`Step_ID = 0`);
             } else {
                 // Non-admins get Step_ID=0 entries only if their email is in the Emails field
@@ -126,48 +158,34 @@ app.get('/api/data', async (req, res) => {
                 }).join(' OR ');
                 whereClauses.push(`Step_ID = 0 AND (${emailConditions})`);
             }
-        }
-        
-        // Add planned timestamp condition for both cases (admins and non-admins)
-        // This condition ensures that tasks with specific planned timestamps are included,
-        // and also tasks without planned timestamps are included.
-        // It allows Step_ID=0 or Step_ID!=0 tasks to be returned if they don't have planned timestamps
-        // or if they have Step_ID=0 and valid planned timestamps.
-        whereClauses.push(`(
-            (Planned_Start_Timestamp IS NULL AND Planned_Delivery_Timestamp IS NULL)
-            OR
-            (Step_ID = 0 AND Planned_Start_Timestamp IS NOT NULL AND Planned_Delivery_Timestamp IS NOT NULL)
-            OR
-            (Step_ID = 0 AND Planned_Start_Timestamp IS NOT NULL AND Planned_Delivery_Timestamp IS NULL)
-            OR
-            (Step_ID = 0 AND Planned_Start_Timestamp IS NULL AND Planned_Delivery_Timestamp IS NOT NULL)
-            OR
-            (Step_ID != 0 AND Planned_Start_Timestamp IS NOT NULL AND Planned_Delivery_Timestamp IS NOT NULL)
-            OR
-            (Step_ID != 0 AND Planned_Start_Timestamp IS NOT NULL AND Planned_Delivery_Timestamp IS NULL)
-            OR
-            (Step_ID != 0 AND Planned_Start_Timestamp IS NULL AND Planned_Delivery_Timestamp IS NOT NULL)
-        )`);
+            
+            // Add planned timestamp condition for both cases (admins and non-admins)
+            whereClauses.push(`(
+                (Planned_Start_Timestamp IS NULL AND Planned_Delivery_Timestamp IS NULL)
+                OR
+                (Step_ID = 0 AND Planned_Start_Timestamp IS NOT NULL AND Planned_Delivery_Timestamp IS NOT NULL)
+                OR
+                (Step_ID = 0 AND Planned_Start_Timestamp IS NOT NULL AND Planned_Delivery_Timestamp IS NULL)
+                OR
+                (Step_ID = 0 AND Planned_Start_Timestamp IS NULL AND Planned_Delivery_Timestamp IS NOT NULL)
+            )`);
 
 
-        if (whereClauses.length > 0) {
-            query += ` WHERE ` + whereClauses.join(' AND ');
+            if (whereClauses.length > 0) {
+                query = `${baseQuery} WHERE ` + whereClauses.join(' AND ');
+            }
+
+            query += ` ORDER BY DelCode_w_o__ LIMIT @limit OFFSET @offset;`;
+            
+            const options = {
+                query: query,
+                params: params,
+            };
+            [rows] = await bigQueryClient.query(options);
         }
 
-        query += ` ORDER BY DelCode_w_o__ LIMIT @limit OFFSET @offset;`;
+        console.log('Data fetched from BigQuery (raw):', rows.length);
 
-        const options = {
-            query: query,
-            params: params,
-        };
-
-        console.log('BigQuery Query:', query);
-        console.log('BigQuery Params:', params);
-
-        const [rows] = await bigQueryClient.query(options);
-        console.log('Data fetched from BigQuery (raw):', rows.length); // Log number of rows
-
-        // Group the data by DelCode_w_o__ regardless of admin status
         const groupedData = rows.reduce((acc, item) => {
             const key = item.DelCode_w_o__;
             if (!acc[key]) {
@@ -387,7 +405,7 @@ app.post('/api/post', async (req, res) => {
                     Frequency___Timeline: 'STRING',
                     Client: 'STRING',
                     Short_Description: 'STRING',
-                    Planned_Start_Timestamp: 'TIMESTAMP',
+                    DUMMY_Start_Timestamp: 'TIMESTAMP', // Corrected type for Planned_Start_Timestamp
                     Planned_Delivery_Timestamp: 'TIMESTAMP',
                     Responsibility: 'STRING',
                     Current_Status: 'STRING',
