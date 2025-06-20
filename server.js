@@ -37,7 +37,6 @@ const bigQueryClient = new BigQuery({
 });
 
 const ADMIN_EMAILS_BACKEND = [
-    "systems@brightbraintech.com",
     "neelam.p@brightbraintech.com",
     "meghna.j@brightbraintech.com",
     "zoya.a@brightbraintech.com",
