@@ -1,6 +1,6 @@
 const express = require('express');
 const { BigQuery } = require('@google-cloud/bigquery');
-const cors = require('cors');
+const cors = require('cors'); // Ensure cors is imported
 const path = require('path');
 const dotenv = require('dotenv');
 
@@ -14,9 +14,31 @@ const bigQueryTable3 = "Per_Person_Per_Day";
 
 const app = express();
 
-// Middleware setup
-app.use(cors());
-app.use(express.json());
+// --- CORS Configuration ---
+// Define your allowed origin. Replace 'https://scheduler-ui-roan.vercel.app' with your actual Vercel frontend URL if it's different.
+const allowedOrigins = [
+    'https://scheduler-ui-roan.vercel.app', // Your Vercel frontend URL
+    'http://localhost:3000', // For local development if you use this port
+    'http://localhost:3001' // If your frontend is sometimes on 3001 for local testing
+];
+
+app.use(cors({
+    origin: function (origin, callback) {
+        // Allow requests with no origin (like mobile apps or curl requests)
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.indexOf(origin) === -1) {
+            const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+            return callback(new Error(msg), false);
+        }
+        return callback(null, true);
+    },
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+    credentials: true, // Allow cookies to be sent with requests if needed
+    optionsSuccessStatus: 204 // Some legacy browsers (IE11, various SmartTVs) choke on 200
+}));
+// --- END CORS Configuration ---
+
+app.use(express.json()); // Ensure express.json() is after cors() if you want cors to apply to all preflight requests
 
 console.log('DEBUG: GOOGLE_PROJECT_ID:', process.env.GOOGLE_PROJECT_ID);
 console.log('DEBUG: BIGQUERY_CLIENT_EMAIL:', process.env.BIGQUERY_CLIENT_EMAIL);
@@ -221,9 +243,8 @@ app.get('/api/data', async (req, res) => {
 // NEW API ENDPOINT: To update Planned_Tasks and Total_Tasks for a specific delivery
 app.put('/api/delivery_counts/:delCode', async (req, res) => {
     const { delCode } = req.params;
-    const { newPlannedTasks, newTotalTasks } = req.body; // Expect new values from frontend
+    const { newPlannedTasks, newTotalTasks } = req.body;
 
-    // Ensure at least one of newPlannedTasks or newTotalTasks is provided
     if (newPlannedTasks === undefined && newTotalTasks === undefined) {
         return res.status(400).send({ error: 'At least one of newPlannedTasks or newTotalTasks must be provided.' });
     }
@@ -266,7 +287,7 @@ app.put('/api/delivery_counts/:delCode', async (req, res) => {
         console.log('BigQuery Update Params (Delivery Counts):', params);
 
         const [job] = await bigQueryClient.createQueryJob(options);
-        await job.getQueryResults(); // Wait for the update to complete
+        await job.getQueryResults();
         res.status(200).send({ message: 'Delivery task counts updated successfully.' });
     } catch (error) {
         console.error('Error updating delivery task counts in BigQuery:', error.message, error.stack);
@@ -275,7 +296,6 @@ app.put('/api/delivery_counts/:delCode', async (req, res) => {
 });
 
 
-// Route to get data from the Per_Key_Per_Day table with summed Duration
 app.get('/api/per-key-per-day', async (req, res) => {
     try {
         const query = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\``;
@@ -299,7 +319,6 @@ app.get('/api/per-key-per-day', async (req, res) => {
     }
 });
 
-// Route to get data from the Per_Person_Per_Day table with summed Duration
 app.get('/api/per-person-per-day', async (req, res) => {
     try {
         const query = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable3}\``;
