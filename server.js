@@ -9,7 +9,7 @@ dotenv.config();
 const projectId = process.env.GOOGLE_PROJECT_ID;
 const bigQueryDataset = process.env.BIGQUERY_DATASET;
 const bigQueryTable = process.env.BIGQUERY_TABLE; // Your main task table
-const bigQueryTable2 = "Per_Key_Per_Day"; // This table will now include Responsibility
+const bigQueryTable2 = "Per_Key_Per_Day"; // This table includes Person_Responsible
 const bigQueryTable3 = "Per_Person_Per_Day";
 
 const app = express();
@@ -90,10 +90,13 @@ app.get('/api/data', async (req, res) => {
         const offset = parseInt(req.query.offset, 10) || 0;
         const rawEmailParam = req.query.email ? req.query.email.toLowerCase() : null; 
         const requestedDelCode = req.query.delCode;
+        const searchTerm = req.query.searchTerm ? req.query.searchTerm.toLowerCase() : ''; // New
+        const selectedClient = req.query.selectedClient ? req.query.selectedClient.toLowerCase() : ''; // New
         
         const isAdminRequest = ADMIN_EMAILS_BACKEND.includes(rawEmailParam);
         console.log(`Backend /api/data: Request from ${rawEmailParam}, isAdminRequest: ${isAdminRequest}`);
         console.log(`Backend /api/data: Requested delCode: ${requestedDelCode}`);
+        console.log(`Backend /api/data: Search Term: "${searchTerm}", Selected Client: "${selectedClient}"`); // New logs
 
 
         if (!rawEmailParam && !isAdminRequest) {
@@ -102,76 +105,70 @@ app.get('/api/data', async (req, res) => {
 
         let baseQuery = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\``;
         let rows = [];
+        let queryParams = { limit, offset }; // Initialize with pagination params
+        let whereClauses = [];
 
         if (requestedDelCode) {
-            let delCodeWhereClause = `WHERE DelCode_w_o__ = @requestedDelCode`;
-            let delCodeParams = { requestedDelCode: requestedDelCode };
-
-            if (isAdminRequest) {
-                const options = {
-                    query: `${baseQuery} ${delCodeWhereClause} ORDER BY Step_ID ASC;`,
-                    params: delCodeParams,
-                };
-                [rows] = await bigQueryClient.query(options);
-                console.log(`Backend /api/data (Detail View - Admin): Fetched ${rows.length} rows for delCode ${requestedDelCode}.`);
-            } else {
-                const queryStep0 = `${baseQuery} WHERE DelCode_w_o__ = @requestedDelCode AND Step_ID = 0;`;
-                const optionsStep0 = {
-                    query: queryStep0,
-                    params: delCodeParams,
-                };
-                const [rowsStep0] = await bigQueryClient.query(optionsStep0);
-                console.log(`Backend /api/data (Detail View - Non-Admin): Fetched ${rowsStep0.length} Step_ID=0 row(s) for delCode ${requestedDelCode}.`);
-
-                const emailsToSearch = rawEmailParam.split(',').map(email => email.trim().toLowerCase()).filter(email => email !== '');
-                let queryTasks = '';
-                let paramsTasks = { requestedDelCode: requestedDelCode };
-
-                if (emailsToSearch.length > 0) {
-                    const emailConditions = emailsToSearch.map((email, index) => {
-                        paramsTasks[`email_${index}`] = email;
-                        return `REGEXP_CONTAINS(LOWER(Emails), CONCAT('(^|[^a-z0-9.@_-])', @email_${index}, '([^a-z0-9.@_-]|$)'))`;
-                    }).join(' OR ');
-                    
-                    queryTasks = `${baseQuery} WHERE DelCode_w_o__ = @requestedDelCode AND Step_ID != 0 AND (${emailConditions});`;
-                    
-                    const optionsTasks = {
-                        query: queryTasks,
-                        params: paramsTasks,
-                    };
-                    const [rowsTasks] = await bigQueryClient.query(optionsTasks);
-                    console.log(`Backend /api/data (Detail View - Non-Admin): Fetched ${rowsTasks.length} assigned task row(s) for delCode ${requestedDelCode}.`);
-                    rows = [...rowsStep0, ...rowsTasks];
-                } else {
-                    rows = rowsStep0;
-                    console.log(`Backend /api/data (Detail View - Non-Admin): No valid email for tasks, returned ${rows.length} Step_ID=0 row(s).`);
-                }
-            }
-        } else {
-            const emailsToSearch = rawEmailParam.split(',').map(email => email.trim().toLowerCase()).filter(email => email !== '');
-            let params = { limit, offset };
+            whereClauses.push(`DelCode_w_o__ = @requestedDelCode`);
+            queryParams.requestedDelCode = requestedDelCode;
 
             if (!isAdminRequest) {
+                // For non-admin, when delCode is requested, also filter by their emails
+                const emailsToSearch = rawEmailParam.split(',').map(email => email.trim().toLowerCase()).filter(email => email !== '');
+                if (emailsToSearch.length > 0) {
+                    const emailConditions = emailsToSearch.map((email, index) => {
+                        queryParams[`email_${index}`] = email;
+                        return `REGEXP_CONTAINS(LOWER(Emails), CONCAT('(^|[^a-z0-9.@_-])', @email_${index}, '([^a-z0-9.@_-]|$)'))`;
+                    }).join(' OR ');
+                    whereClauses.push(`(${emailConditions})`);
+                }
+            }
+            // For detail view, we always get all steps for the specific delCode
+            // No limit/offset needed for detail view as we want all tasks for that code
+            const query = `${baseQuery} WHERE ${whereClauses.join(' AND ')} ORDER BY Step_ID ASC;`;
+            const options = { query: query, params: queryParams };
+            [rows] = await bigQueryClient.query(options);
+            console.log(`Backend /api/data (Detail View): Fetched ${rows.length} rows for delCode ${requestedDelCode}.`);
+
+        } else {
+            // Logic for the main Delivery List page (list view)
+            whereClauses.push(`Step_ID = 0`); // Always filter for Step_ID = 0 for the list view
+
+            // Add search term filter
+            if (searchTerm) {
+                whereClauses.push(`(REGEXP_CONTAINS(LOWER(DelCode_w_o__), @searchTerm) OR REGEXP_CONTAINS(LOWER(Client), @searchTerm))`);
+                queryParams.searchTerm = searchTerm;
+            }
+
+            // Add selected client filter
+            if (selectedClient) {
+                whereClaases.push(`LOWER(Client) = @selectedClient`);
+                queryParams.selectedClient = selectedClient;
+            }
+
+            if (!isAdminRequest) {
+                const emailsToSearch = rawEmailParam.split(',').map(email => email.trim().toLowerCase()).filter(email => email !== '');
                 if (emailsToSearch.length === 0) {
                     return res.status(400).json({ message: 'No valid email addresses provided for non-admin request.' });
                 }
 
                 const emailConditions = emailsToSearch.map((email, index) => {
-                    params[`email_${index}`] = email;
+                    queryParams[`email_${index}`] = email;
                     return `REGEXP_CONTAINS(LOWER(Emails), CONCAT('(^|[^a-z0-9.@_-])', @email_${index}, '([^a-z0-9.@_-]|$)'))`;
                 }).join(' OR ');
+                whereClauses.push(`(${emailConditions})`);
 
                 const findRelevantDelCodesQuery = `
                     SELECT DISTINCT DelCode_w_o__
                     FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
-                    WHERE (${emailConditions})
+                    WHERE ${whereClauses.join(' AND ')}
                 `;
                 console.log('Backend /api/data (List View - Non-Admin): Query to find relevant DelCodes:', findRelevantDelCodesQuery);
-                console.log('Backend /api/data (List View - Non-Admin): Params for DelCode query:', params);
+                console.log('Backend /api/data (List View - Non-Admin): Params for DelCode query:', queryParams);
 
                 const [relevantDelCodesRows] = await bigQueryClient.query({
                     query: findRelevantDelCodesQuery,
-                    params: params
+                    params: queryParams
                 });
 
                 const relevantDelCodes = relevantDelCodesRows.map(row => row.DelCode_w_o__);
@@ -183,40 +180,36 @@ app.get('/api/data', async (req, res) => {
                 } else {
                     const delCodePlaceholders = relevantDelCodes.map((_, i) => `@delCode_${i}`).join(',');
                     relevantDelCodes.forEach((code, i) => {
-                        params[`delCode_${i}`] = code;
+                        queryParams[`delCode_${i}`] = code;
                     });
+                    
+                    // Filter the results further by the relevant delcodes
+                    whereClauses.push(`DelCode_w_o__ IN (${delCodePlaceholders})`);
 
                     const fetchStep0ForRelevantDelCodesQuery = `
                         ${baseQuery}
-                        WHERE DelCode_w_o__ IN (${delCodePlaceholders}) AND Step_ID = 0
+                        WHERE ${whereClauses.join(' AND ')}
                         ORDER BY DelCode_w_o__ LIMIT @limit OFFSET @offset;
                     `;
                     console.log('Backend /api/data (List View - Non-Admin): Query to fetch Step_ID=0 for relevant DelCodes:', fetchStep0ForRelevantDelCodesQuery);
-                    console.log('Backend /api/data (List View - Non-Admin): Params for Step_ID=0 query:', params);
+                    console.log('Backend /api/data (List View - Non-Admin): Params for Step_ID=0 query:', queryParams);
                     [rows] = await bigQueryClient.query({
                         query: fetchStep0ForRelevantDelCodesQuery,
-                        params: params
+                        params: queryParams
                     });
                     console.log(`Backend /api/data (List View - Non-Admin): Fetched ${rows.length} Step_ID=0 rows after filtering by relevant DelCodes. Raw rows:`, rows);
                 }
             } else { // Admin logic for DeliveryList page (no specific delCode)
-                let whereClauses = [];
-                whereClauses.push(`Step_ID = 0`);
-                 whereClauses.push(`(
-                    (Planned_Start_Timestamp IS NULL AND Planned_Delivery_Timestamp IS NULL)
-                    OR
-                    (Planned_Start_Timestamp IS NOT NULL AND Planned_Delivery_Timestamp IS NOT NULL)
-                    OR
-                    (Planned_Start_Timestamp IS NOT NULL AND Planned_Delivery_Timestamp IS NULL)
-                    OR
-                    (Planned_Start_Timestamp IS NULL AND Planned_Delivery_Timestamp IS NOT NULL)
-                )`);
-
-                let query = `${baseQuery} WHERE ` + whereClauses.join(' AND ');
+                // Admins see all Step_ID=0 deliveries, but still subject to searchTerm and selectedClient
+                let query = `${baseQuery}`;
+                if (whereClauses.length > 0) {
+                    query += ` WHERE ${whereClauses.join(' AND ')}`;
+                }
                 query += ` ORDER BY DelCode_w_o__ LIMIT @limit OFFSET @offset;`;
-                const options = { query: query, params: params };
+                
+                const options = { query: query, params: queryParams };
                 [rows] = await bigQueryClient.query(options);
-                console.log(`Backend /api/data (List View - Admin): Fetched ${rows.length} Step_ID=0 rows. Raw rows:`, rows);
+                console.log(`Backend /api/data (List View - Admin): Fetched ${rows.length} Step_ID=0 rows with filters. Raw rows:`, rows);
             }
         }
 
@@ -297,8 +290,7 @@ app.put('/api/delivery_counts/:delCode', async (req, res) => {
 
 app.get('/api/per-key-per-day', async (req, res) => {
     try {
-        // --- UPDATED: Select Responsibility as well ---
-        const query = `SELECT Key, day, duration, Planned_Delivery_Slot, Responsibility FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\``;
+        const query = `SELECT Key, day, duration, Planned_Delivery_Slot, Person_Responsible FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\``;
         const [rows] = await bigQueryClient.query(query);
 
         const groupedData = rows.reduce((acc, item) => {
@@ -536,41 +528,41 @@ app.post('/api/post', async (req, res) => {
             const [sliderRows] = await bigQueryClient.query(selectQuery);
 
             if (sliderRows.length > 0) {
-                // --- UPDATED: Include Responsibility in UPDATE for Per_Key_Per_Day ---
+                // --- UPDATED: Include Person_Responsible in UPDATE for Per_Key_Per_Day ---
                 return {
-                    query: `UPDATE \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\` SET duration = @duration, Responsibility = @Responsibility WHERE Key = @Key AND day = @day AND Planned_Delivery_Slot=@Planned_Delivery_Slot`,
+                    query: `UPDATE \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\` SET duration = @duration, Person_Responsible = @Person_Responsible WHERE Key = @Key AND day = @day AND Planned_Delivery_Slot=@Planned_Delivery_Slot`,
                     params: {
                         Key: Number(Key),
                         day: slider.day,
                         duration: Number(slider.duration),
                         Planned_Delivery_Slot: slider.slot,
-                        Responsibility: slider.personResponsible || null, // Use from slider data
+                        Person_Responsible: slider.personResponsible || null, // Use from slider data
                     },
                     types: {
                         Key: 'INT64',
                         day: 'STRING',
                         duration: 'INT64',
                         Planned_Delivery_Slot: 'STRING',
-                        Responsibility: 'STRING', // Define type for new column
+                        Person_Responsible: 'STRING', // Define type for new column
                     },
                 };
             } else {
-                // --- UPDATED: Include Responsibility in INSERT for Per_Key_Per_Day ---
+                // --- UPDATED: Include Person_Responsible in INSERT for Per_Key_Per_Day ---
                 return {
-                    query: `INSERT INTO \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\` (Key, day, duration, Planned_Delivery_Slot, Responsibility) VALUES (@Key, @day, @duration, @Planned_Delivery_Slot, @Responsibility)`,
+                    query: `INSERT INTO \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\` (Key, day, duration, Planned_Delivery_Slot, Person_Responsible) VALUES (@Key, @day, @duration, @Planned_Delivery_Slot, @Person_Responsible)`,
                     params: {
                         Key: Number(Key),
                         day: slider.day,
                         duration: Number(slider.duration),
                         Planned_Delivery_Slot: slider.slot,
-                        Responsibility: slider.personResponsible || null, // Use from slider data
+                        Person_Responsible: slider.personResponsible || null, // Use from slider data
                     },
                     types: {
                         Key: 'INT64',
                         day: 'STRING',
                         duration: 'INT64',
                         Planned_Delivery_Slot: 'STRING',
-                        Responsibility: 'STRING', // Define type for new column
+                        Person_Responsible: 'STRING', // Define type for new column
                     },
                 };
             }
