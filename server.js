@@ -90,13 +90,13 @@ app.get('/api/data', async (req, res) => {
         const offset = parseInt(req.query.offset, 10) || 0;
         const rawEmailParam = req.query.email ? req.query.email.toLowerCase() : null; 
         const requestedDelCode = req.query.delCode;
-        const searchTerm = req.query.searchTerm ? req.query.searchTerm.toLowerCase() : ''; // New
-        const selectedClient = req.query.selectedClient ? req.query.selectedClient.toLowerCase() : ''; // New
+        const searchTerm = req.query.searchTerm ? req.query.searchTerm.toLowerCase() : '';
+        const selectedClient = req.query.selectedClient ? req.query.selectedClient.toLowerCase() : '';
         
         const isAdminRequest = ADMIN_EMAILS_BACKEND.includes(rawEmailParam);
         console.log(`Backend /api/data: Request from ${rawEmailParam}, isAdminRequest: ${isAdminRequest}`);
         console.log(`Backend /api/data: Requested delCode: ${requestedDelCode}`);
-        console.log(`Backend /api/data: Search Term: "${searchTerm}", Selected Client: "${selectedClient}"`); // New logs
+        console.log(`Backend /api/data: Search Term: "${searchTerm}", Selected Client: "${selectedClient}"`);
 
 
         if (!rawEmailParam && !isAdminRequest) {
@@ -105,15 +105,14 @@ app.get('/api/data', async (req, res) => {
 
         let baseQuery = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\``;
         let rows = [];
-        let queryParams = { limit, offset }; // Initialize with pagination params
-        let whereClauses = [];
+        let queryParams = { limit, offset };
+        let whereClauses = []; // Initialize whereClauses here
 
         if (requestedDelCode) {
             whereClauses.push(`DelCode_w_o__ = @requestedDelCode`);
             queryParams.requestedDelCode = requestedDelCode;
 
             if (!isAdminRequest) {
-                // For non-admin, when delCode is requested, also filter by their emails
                 const emailsToSearch = rawEmailParam.split(',').map(email => email.trim().toLowerCase()).filter(email => email !== '');
                 if (emailsToSearch.length > 0) {
                     const emailConditions = emailsToSearch.map((email, index) => {
@@ -123,26 +122,21 @@ app.get('/api/data', async (req, res) => {
                     whereClauses.push(`(${emailConditions})`);
                 }
             }
-            // For detail view, we always get all steps for the specific delCode
-            // No limit/offset needed for detail view as we want all tasks for that code
             const query = `${baseQuery} WHERE ${whereClauses.join(' AND ')} ORDER BY Step_ID ASC;`;
             const options = { query: query, params: queryParams };
             [rows] = await bigQueryClient.query(options);
             console.log(`Backend /api/data (Detail View): Fetched ${rows.length} rows for delCode ${requestedDelCode}.`);
 
         } else {
-            // Logic for the main Delivery List page (list view)
             whereClauses.push(`Step_ID = 0`); // Always filter for Step_ID = 0 for the list view
 
-            // Add search term filter
             if (searchTerm) {
                 whereClauses.push(`(REGEXP_CONTAINS(LOWER(DelCode_w_o__), @searchTerm) OR REGEXP_CONTAINS(LOWER(Client), @searchTerm))`);
                 queryParams.searchTerm = searchTerm;
             }
 
-            // Add selected client filter
             if (selectedClient) {
-                whereClaases.push(`LOWER(Client) = @selectedClient`);
+                whereClauses.push(`LOWER(Client) = @selectedClient`); // Fixed typo: whereClaases to whereClauses
                 queryParams.selectedClient = selectedClient;
             }
 
@@ -183,7 +177,6 @@ app.get('/api/data', async (req, res) => {
                         queryParams[`delCode_${i}`] = code;
                     });
                     
-                    // Filter the results further by the relevant delcodes
                     whereClauses.push(`DelCode_w_o__ IN (${delCodePlaceholders})`);
 
                     const fetchStep0ForRelevantDelCodesQuery = `
@@ -200,7 +193,6 @@ app.get('/api/data', async (req, res) => {
                     console.log(`Backend /api/data (List View - Non-Admin): Fetched ${rows.length} Step_ID=0 rows after filtering by relevant DelCodes. Raw rows:`, rows);
                 }
             } else { // Admin logic for DeliveryList page (no specific delCode)
-                // Admins see all Step_ID=0 deliveries, but still subject to searchTerm and selectedClient
                 let query = `${baseQuery}`;
                 if (whereClauses.length > 0) {
                     query += ` WHERE ${whereClauses.join(' AND ')}`;
