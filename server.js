@@ -1,6 +1,6 @@
 const express = require('express');
 const { BigQuery } = require('@google-cloud/bigquery');
-const cors = require('cors'); // Ensure cors is imported
+const cors = require('cors');
 const path = require('path');
 const dotenv = require('dotenv');
 
@@ -9,13 +9,12 @@ dotenv.config();
 const projectId = process.env.GOOGLE_PROJECT_ID;
 const bigQueryDataset = process.env.BIGQUERY_DATASET;
 const bigQueryTable = process.env.BIGQUERY_TABLE; // Your main task table
-const bigQueryTable2 = "Per_Key_Per_Day";
+const bigQueryTable2 = "Per_Key_Per_Day"; // This table will now include Responsibility
 const bigQueryTable3 = "Per_Person_Per_Day";
 
 const app = express();
 
 // --- CORS Configuration ---
-// Define your allowed origin. Replace 'https://scheduler-ui-roan.vercel.app' with your actual Vercel frontend URL if it's different.
 const allowedOrigins = [
     'https://scheduler-ui-roan.vercel.app', // Your Vercel frontend URL
     'http://localhost:3000', // For local development if you use this port
@@ -24,7 +23,6 @@ const allowedOrigins = [
 
 app.use(cors({
     origin: function (origin, callback) {
-        // Allow requests with no origin (like mobile apps or curl requests)
         if (!origin) return callback(null, true);
         if (allowedOrigins.indexOf(origin) === -1) {
             const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
@@ -33,12 +31,12 @@ app.use(cors({
         return callback(null, true);
     },
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
-    credentials: true, // Allow cookies to be sent with requests if needed
-    optionsSuccessStatus: 204 // Some legacy browsers (IE11, various SmartTVs) choke on 200
+    credentials: true,
+    optionsSuccessStatus: 204
 }));
 // --- END CORS Configuration ---
 
-app.use(express.json()); // Ensure express.json() is after cors() if you want cors to apply to all preflight requests
+app.use(express.json());
 
 console.log('DEBUG: GOOGLE_PROJECT_ID:', process.env.GOOGLE_PROJECT_ID);
 console.log('DEBUG: BIGQUERY_CLIENT_EMAIL:', process.env.BIGQUERY_CLIENT_EMAIL);
@@ -132,7 +130,7 @@ app.get('/api/data', async (req, res) => {
                 if (emailsToSearch.length > 0) {
                     const emailConditions = emailsToSearch.map((email, index) => {
                         paramsTasks[`email_${index}`] = email;
-                        return `REGEXP_CONTAINS(LOWER(Emails), CONCAT('(^|[[:space:],])', @email_${index}, '([[:space:],]|$)'))`;
+                        return `REGEXP_CONTAINS(LOWER(Emails), CONCAT('(^|[^a-z0-9.@_-])', @email_${index}, '([^a-z0-9.@_-]|$)'))`;
                     }).join(' OR ');
                     
                     queryTasks = `${baseQuery} WHERE DelCode_w_o__ = @requestedDelCode AND Step_ID != 0 AND (${emailConditions});`;
@@ -160,7 +158,7 @@ app.get('/api/data', async (req, res) => {
 
                 const emailConditions = emailsToSearch.map((email, index) => {
                     params[`email_${index}`] = email;
-                    return `REGEXP_CONTAINS(LOWER(Emails), CONCAT('(^|[[:space:],])', @email_${index}, '([[:space:],]|$)'))`;
+                    return `REGEXP_CONTAINS(LOWER(Emails), CONCAT('(^|[^a-z0-9.@_-])', @email_${index}, '([^a-z0-9.@_-]|$)'))`;
                 }).join(' OR ');
 
                 const findRelevantDelCodesQuery = `
@@ -299,7 +297,8 @@ app.put('/api/delivery_counts/:delCode', async (req, res) => {
 
 app.get('/api/per-key-per-day', async (req, res) => {
     try {
-        const query = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\``;
+        // --- UPDATED: Select Responsibility as well ---
+        const query = `SELECT Key, day, duration, Planned_Delivery_Slot, Responsibility FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\``;
         const [rows] = await bigQueryClient.query(query);
 
         const groupedData = rows.reduce((acc, item) => {
@@ -346,7 +345,7 @@ app.post('/api/post', async (req, res) => {
         Planned_Start_Timestamp,
         Selected_Planned_Start_Timestamp,
         Planned_Delivery_Timestamp,
-        Responsibility,
+        Responsibility, // Main task Responsibility
         Current_Status,
         Email,
         Emails,
@@ -358,10 +357,10 @@ app.post('/api/post', async (req, res) => {
         Updated_at,
         Time_Left_For_Next_Task_dd_hh_mm_ss,
         Card_Corner_Status,
-        sliders
+        sliders // Each slider now contains its own personResponsible
     } = req.body;
 
-    console.log("Hi", req.body);
+    console.log("Backend /api/post: Received data for Key:", Key, req.body);
 
     if (!sliders || sliders.length === 0) {
         return res.status(400).send({ error: 'Slider data is mandatory.' });
@@ -378,6 +377,7 @@ app.post('/api/post', async (req, res) => {
         const [existingTasks] = await bigQueryClient.query(checkOptions);
 
         if (existingTasks.length > 0) {
+            // Update main task table
             const updateQuery = `UPDATE \`${projectId}.${bigQueryDataset}.${bigQueryTable}\` SET
                 Delivery_code = @Delivery_code,
                 DelCode_w_o__ = @DelCode_w_o__,
@@ -395,7 +395,6 @@ app.post('/api/post', async (req, res) => {
                 Total_Tasks = @Total_Tasks,
                 Completed_Tasks = @Completed_Tasks,
                 Planned_Tasks = @Planned_Tasks,
-                Total_Tasks = @Total_Tasks,
                 Percent_Tasks_Completed = @Percent_Tasks_Completed,
                 Created_at = @Created_at,
                 Updated_at = @Updated_at,
@@ -454,9 +453,10 @@ app.post('/api/post', async (req, res) => {
                     Card_Corner_Status: 'STRING',
                 }
             };
-
             await bigQueryClient.createQueryJob(updateOptions);
+            console.log(`Backend /api/post: Successfully updated main task with Key: ${Key}`);
         } else {
+            // Insert logic (unchanged)
             const insertQuery = `INSERT INTO \`${projectId}.${bigQueryDataset}.${bigQueryTable}\` (Key, Delivery_code, DelCode_w_o__, Step_ID, Task_Details, Frequency___Timeline, Client, Short_Description, Planned_Start_Timestamp, Planned_Delivery_Timestamp, Responsibility, Current_Status,Email, Total_Tasks, Completed_Tasks, Planned_Tasks, Percent_Tasks_Completed, Created_at, Updated_at, Time_Left_For_Next_Task_dd_hh_mm_ss, Card_Corner_Status)
             VALUES (@Key, @Delivery_code, @DelCode_w_o__, @Step_ID, @Task_Details, @Frequency___Timeline, @Client, @Short_description, @Planned_Start_Timestamp, @Planned_Delivery_Timestamp, @Responsibility, @Current_Status,@Email, @Total_Tasks, @Completed_Tasks, @Planned_Tasks, @Percent_Tasks_Completed, @Created_at, @Updated_at, @Time_Left_For_Next_Task_dd_hh_mm_ss, @Card_Corner_Status)`;
 
@@ -513,9 +513,10 @@ app.post('/api/post', async (req, res) => {
             };
 
             await bigQueryClient.createQueryJob(insertOptions);
+            console.log(`Backend /api/post: Successfully inserted new task with Key: ${Key}`);
         }
 
-        console.log('Received sliders data:', sliders);
+        console.log('Backend /api/post: Processing sliders data:', sliders.length, 'entries');
 
         const insertOrUpdateSliderQueries = await Promise.all(sliders.map(async (slider) => {
             const selectQuery = {
@@ -535,35 +536,41 @@ app.post('/api/post', async (req, res) => {
             const [sliderRows] = await bigQueryClient.query(selectQuery);
 
             if (sliderRows.length > 0) {
+                // --- UPDATED: Include Responsibility in UPDATE for Per_Key_Per_Day ---
                 return {
-                    query: `UPDATE \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\` SET duration = @duration WHERE Key = @Key AND day = @day AND Planned_Delivery_Slot=@Planned_Delivery_Slot`,
+                    query: `UPDATE \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\` SET duration = @duration, Responsibility = @Responsibility WHERE Key = @Key AND day = @day AND Planned_Delivery_Slot=@Planned_Delivery_Slot`,
                     params: {
                         Key: Number(Key),
                         day: slider.day,
                         duration: Number(slider.duration),
                         Planned_Delivery_Slot: slider.slot,
+                        Responsibility: slider.personResponsible || null, // Use from slider data
                     },
                     types: {
                         Key: 'INT64',
                         day: 'STRING',
                         duration: 'INT64',
                         Planned_Delivery_Slot: 'STRING',
+                        Responsibility: 'STRING', // Define type for new column
                     },
                 };
             } else {
+                // --- UPDATED: Include Responsibility in INSERT for Per_Key_Per_Day ---
                 return {
-                    query: `INSERT INTO \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\` (Key, day, duration,Planned_Delivery_Slot) VALUES (@Key, @day, @duration,@Planned_Delivery_Slot)`,
+                    query: `INSERT INTO \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\` (Key, day, duration, Planned_Delivery_Slot, Responsibility) VALUES (@Key, @day, @duration, @Planned_Delivery_Slot, @Responsibility)`,
                     params: {
                         Key: Number(Key),
                         day: slider.day,
                         duration: Number(slider.duration),
-                        Planned_Delivery_Slot: slider.slot
+                        Planned_Delivery_Slot: slider.slot,
+                        Responsibility: slider.personResponsible || null, // Use from slider data
                     },
                     types: {
                         Key: 'INT64',
                         day: 'STRING',
                         duration: 'INT64',
                         Planned_Delivery_Slot: 'STRING',
+                        Responsibility: 'STRING', // Define type for new column
                     },
                 };
             }
@@ -574,6 +581,7 @@ app.post('/api/post', async (req, res) => {
                 await bigQueryClient.createQueryJob(queryOption);
             })
         );
+        console.log('Backend /api/post: Sliders data processed successfully.');
 
         res.status(200).send({ message: 'Task and slider data stored or updated successfully.' });
     } catch (error) {
@@ -582,7 +590,6 @@ app.post('/api/post', async (req, res) => {
     }
 });
 
-// Update Task in BigQuery (Existing route, probably for individual task updates)
 app.put('/api/data/:key', async (req, res) => {
     const { key } = req.params;
     const { taskName, startDate, endDate, assignTo, status } = req.body;
@@ -608,7 +615,6 @@ app.put('/api/data/:key', async (req, res) => {
     }
 });
 
-// Delete Task from BigQuery
 app.delete('/api/data/:deliveryCode', async (req, res) => {
     const { deliveryCode } = req.params;
     console.log("hi", req.params)
