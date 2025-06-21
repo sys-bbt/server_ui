@@ -9,7 +9,7 @@ dotenv.config();
 const projectId = process.env.GOOGLE_PROJECT_ID;
 const bigQueryDataset = process.env.BIGQUERY_DATASET;
 const bigQueryTable = process.env.BIGQUERY_TABLE; // Your main task table
-const bigQueryTable2 = "Per_Key_Per_Day"; // This table includes Person_Responsible
+const bigQueryTable2 = "Per_Key_Per_Day"; // This table includes Responsibility
 const bigQueryTable3 = "Per_Person_Per_Day";
 
 const app = express();
@@ -106,7 +106,7 @@ app.get('/api/data', async (req, res) => {
         let baseQuery = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\``;
         let rows = [];
         let queryParams = { limit, offset };
-        let whereClauses = []; // Initialize whereClauses here
+        let whereClauses = []; 
 
         if (requestedDelCode) {
             whereClauses.push(`DelCode_w_o__ = @requestedDelCode`);
@@ -128,7 +128,7 @@ app.get('/api/data', async (req, res) => {
             console.log(`Backend /api/data (Detail View): Fetched ${rows.length} rows for delCode ${requestedDelCode}.`);
 
         } else {
-            whereClauses.push(`Step_ID = 0`); // Always filter for Step_ID = 0 for the list view
+            whereClauses.push(`Step_ID = 0`); 
 
             if (searchTerm) {
                 whereClauses.push(`(REGEXP_CONTAINS(LOWER(DelCode_w_o__), @searchTerm) OR REGEXP_CONTAINS(LOWER(Client), @searchTerm))`);
@@ -136,7 +136,7 @@ app.get('/api/data', async (req, res) => {
             }
 
             if (selectedClient) {
-                whereClauses.push(`LOWER(Client) = @selectedClient`); // Fixed typo: whereClaases to whereClauses
+                whereClauses.push(`LOWER(Client) = @selectedClient`);
                 queryParams.selectedClient = selectedClient;
             }
 
@@ -282,7 +282,8 @@ app.put('/api/delivery_counts/:delCode', async (req, res) => {
 
 app.get('/api/per-key-per-day', async (req, res) => {
     try {
-        const query = `SELECT Key, day, duration, Planned_Delivery_Slot, Person_Responsible FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\``;
+        // Corrected to use 'Responsibility' as per user's BigQuery schema
+        const query = `SELECT Key, day, duration, Planned_Delivery_Slot, Responsibility FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\``;
         const [rows] = await bigQueryClient.query(query);
 
         const groupedData = rows.reduce((acc, item) => {
@@ -341,7 +342,7 @@ app.post('/api/post', async (req, res) => {
         Updated_at,
         Time_Left_For_Next_Task_dd_hh_mm_ss,
         Card_Corner_Status,
-        sliders // Each slider now contains its own personResponsible
+        sliders // Each slider now contains its own Responsibility
     } = req.body;
 
     console.log("Backend /api/post: Received data for Key:", Key, req.body);
@@ -520,41 +521,41 @@ app.post('/api/post', async (req, res) => {
             const [sliderRows] = await bigQueryClient.query(selectQuery);
 
             if (sliderRows.length > 0) {
-                // --- UPDATED: Include Person_Responsible in UPDATE for Per_Key_Per_Day ---
+                // Corrected to use 'Responsibility' as per user's BigQuery schema
                 return {
-                    query: `UPDATE \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\` SET duration = @duration, Person_Responsible = @Person_Responsible WHERE Key = @Key AND day = @day AND Planned_Delivery_Slot=@Planned_Delivery_Slot`,
+                    query: `UPDATE \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\` SET duration = @duration, Responsibility = @Responsibility WHERE Key = @Key AND day = @day AND Planned_Delivery_Slot=@Planned_Delivery_Slot`,
                     params: {
                         Key: Number(Key),
                         day: slider.day,
                         duration: Number(slider.duration),
                         Planned_Delivery_Slot: slider.slot,
-                        Person_Responsible: slider.personResponsible || null, // Use from slider data
+                        Responsibility: slider.personResponsible || null, // Use from slider data
                     },
                     types: {
                         Key: 'INT64',
                         day: 'STRING',
                         duration: 'INT64',
                         Planned_Delivery_Slot: 'STRING',
-                        Person_Responsible: 'STRING', // Define type for new column
+                        Responsibility: 'STRING', // Define type for new column
                     },
                 };
             } else {
-                // --- UPDATED: Include Person_Responsible in INSERT for Per_Key_Per_Day ---
+                // Corrected to use 'Responsibility' as per user's BigQuery schema
                 return {
-                    query: `INSERT INTO \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\` (Key, day, duration, Planned_Delivery_Slot, Person_Responsible) VALUES (@Key, @day, @duration, @Planned_Delivery_Slot, @Person_Responsible)`,
+                    query: `INSERT INTO \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\` (Key, day, duration, Planned_Delivery_Slot, Responsibility) VALUES (@Key, @day, @duration, @Planned_Delivery_Slot, @Responsibility)`,
                     params: {
                         Key: Number(Key),
                         day: slider.day,
                         duration: Number(slider.duration),
                         Planned_Delivery_Slot: slider.slot,
-                        Person_Responsible: slider.personResponsible || null, // Use from slider data
+                        Responsibility: slider.personResponsible || null, // Use from slider data
                     },
                     types: {
                         Key: 'INT64',
                         day: 'STRING',
                         duration: 'INT64',
                         Planned_Delivery_Slot: 'STRING',
-                        Person_Responsible: 'STRING', // Define type for new column
+                        Responsibility: 'STRING', // Define type for new column
                     },
                 };
             }
