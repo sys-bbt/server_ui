@@ -9,33 +9,13 @@ dotenv.config();
 const projectId = process.env.GOOGLE_PROJECT_ID;
 const bigQueryDataset = process.env.BIGQUERY_DATASET;
 const bigQueryTable = process.env.BIGQUERY_TABLE; // Your main task table
-const bigQueryTable2 = "Per_Key_Per_Day"; // This table includes Responsibility
+const bigQueryTable2 = "Per_Key_Per_Day";
 const bigQueryTable3 = "Per_Person_Per_Day";
 
 const app = express();
 
-// --- CORS Configuration ---
-const allowedOrigins = [
-    'https://scheduler-ui-roan.vercel.app', // Your Vercel frontend URL
-    'http://localhost:3000', // For local development if you use this port
-    'http://localhost:3001' // If your frontend is sometimes on 3001 for local testing
-];
-
-app.use(cors({
-    origin: function (origin, callback) {
-        if (!origin) return callback(null, true);
-        if (allowedOrigins.indexOf(origin) === -1) {
-            const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
-            return callback(new Error(msg), false);
-        }
-        return callback(null, true);
-    },
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
-    credentials: true,
-    optionsSuccessStatus: 204
-}));
-// --- END CORS Configuration ---
-
+// Middleware setup
+app.use(cors());
 app.use(express.json());
 
 console.log('DEBUG: GOOGLE_PROJECT_ID:', process.env.GOOGLE_PROJECT_ID);
@@ -88,15 +68,13 @@ app.get('/api/data', async (req, res) => {
     try {
         const limit = parseInt(req.query.limit, 10) || 500;
         const offset = parseInt(req.query.offset, 10) || 0;
+        // Convert rawEmailParam to lowercase at the very beginning for consistency
         const rawEmailParam = req.query.email ? req.query.email.toLowerCase() : null; 
         const requestedDelCode = req.query.delCode;
-        const searchTerm = req.query.searchTerm ? req.query.searchTerm.toLowerCase() : '';
-        const selectedClient = req.query.selectedClient ? req.query.selectedClient.toLowerCase() : '';
         
         const isAdminRequest = ADMIN_EMAILS_BACKEND.includes(rawEmailParam);
         console.log(`Backend /api/data: Request from ${rawEmailParam}, isAdminRequest: ${isAdminRequest}`);
         console.log(`Backend /api/data: Requested delCode: ${requestedDelCode}`);
-        console.log(`Backend /api/data: Search Term: "${searchTerm}", Selected Client: "${selectedClient}"`);
 
 
         if (!rawEmailParam && !isAdminRequest) {
@@ -105,103 +83,135 @@ app.get('/api/data', async (req, res) => {
 
         let baseQuery = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\``;
         let rows = [];
-        let queryParams = { limit, offset };
-        let whereClauses = []; 
 
         if (requestedDelCode) {
-            whereClauses.push(`DelCode_w_o__ = @requestedDelCode`);
-            queryParams.requestedDelCode = requestedDelCode;
+            // Logic for DeliveryDetail page (specific delCode requested)
+            let delCodeWhereClause = `WHERE DelCode_w_o__ = @requestedDelCode`;
+            let delCodeParams = { requestedDelCode: requestedDelCode };
 
-            if (!isAdminRequest) {
-                const emailsToSearch = rawEmailParam.split(',').map(email => email.trim().toLowerCase()).filter(email => email !== '');
+            if (isAdminRequest) {
+                // Admins see all tasks for the requested delCode
+                const options = {
+                    query: `${baseQuery} ${delCodeWhereClause} ORDER BY Step_ID ASC;`,
+                    params: delCodeParams,
+                };
+                [rows] = await bigQueryClient.query(options);
+                console.log(`Backend /api/data (Detail View - Admin): Fetched ${rows.length} rows for delCode ${requestedDelCode}.`);
+            } else {
+                // Non-admins: Always get Step_ID=0 + their assigned tasks for this delCode
+                
+                // Query 1: Get the Step_ID=0 entry for this delCode (unconditionally)
+                const queryStep0 = `${baseQuery} WHERE DelCode_w_o__ = @requestedDelCode AND Step_ID = 0;`;
+                const optionsStep0 = {
+                    query: queryStep0,
+                    params: delCodeParams,
+                };
+                const [rowsStep0] = await bigQueryClient.query(optionsStep0);
+                console.log(`Backend /api/data (Detail View - Non-Admin): Fetched ${rowsStep0.length} Step_ID=0 row(s) for delCode ${requestedDelCode}.`);
+
+
+                // Query 2: Get all tasks (Step_ID != 0) for this delCode assigned to the user
+                const emailsToSearch = rawEmailParam.split(',').map(email => email.trim().toLowerCase()).filter(email => email !== ''); // Already lowercase
+                let queryTasks = '';
+                let paramsTasks = { requestedDelCode: requestedDelCode };
+
                 if (emailsToSearch.length > 0) {
                     const emailConditions = emailsToSearch.map((email, index) => {
-                        queryParams[`email_${index}`] = email;
-                        return `REGEXP_CONTAINS(LOWER(Emails), CONCAT('(^|[^a-z0-9.@_-])', @email_${index}, '([^a-z0-9.@_-]|$)'))`;
+                        paramsTasks[`email_${index}`] = email;
+                        // Changed regex to be more robust for separators (commas, spaces, or start/end of string)
+                        return `REGEXP_CONTAINS(LOWER(Emails), CONCAT('(^|[[:space:],])', @email_${index}, '([[:space:],]|$)'))`;
                     }).join(' OR ');
-                    whereClauses.push(`(${emailConditions})`);
+                    
+                    queryTasks = `${baseQuery} WHERE DelCode_w_o__ = @requestedDelCode AND Step_ID != 0 AND (${emailConditions});`;
+                    
+                    const optionsTasks = {
+                        query: queryTasks,
+                        params: paramsTasks,
+                    };
+                    const [rowsTasks] = await bigQueryClient.query(optionsTasks);
+                    console.log(`Backend /api/data (Detail View - Non-Admin): Fetched ${rowsTasks.length} assigned task row(s) for delCode ${requestedDelCode}.`);
+                    rows = [...rowsStep0, ...rowsTasks]; // Combine Step_ID=0 and assigned tasks
+                } else {
+                    // If no valid email for non-admin, just return Step_ID=0 (if it exists)
+                    rows = rowsStep0;
+                    console.log(`Backend /api/data (Detail View - Non-Admin): No valid email for tasks, returned ${rows.length} Step_ID=0 row(s).`);
                 }
             }
-            const query = `${baseQuery} WHERE ${whereClauses.join(' AND ')} ORDER BY Step_ID ASC;`;
-            const options = { query: query, params: queryParams };
-            [rows] = await bigQueryClient.query(options);
-            console.log(`Backend /api/data (Detail View): Fetched ${rows.length} rows for delCode ${requestedDelCode}.`);
-
         } else {
-            whereClauses.push(`Step_ID = 0`); 
-
-            if (searchTerm) {
-                whereClauses.push(`(REGEXP_CONTAINS(LOWER(DelCode_w_o__), @searchTerm) OR REGEXP_CONTAINS(LOWER(Client), @searchTerm))`);
-                queryParams.searchTerm = searchTerm;
-            }
-
-            if (selectedClient) {
-                whereClauses.push(`LOWER(Client) = @selectedClient`);
-                queryParams.selectedClient = selectedClient;
-            }
+            // Logic for DeliveryList page (no specific delCode requested)
+            const emailsToSearch = rawEmailParam.split(',').map(email => email.trim().toLowerCase()).filter(email => email !== ''); // Already lowercase
+            let params = { limit, offset };
 
             if (!isAdminRequest) {
-                const emailsToSearch = rawEmailParam.split(',').map(email => email.trim().toLowerCase()).filter(email => email !== '');
                 if (emailsToSearch.length === 0) {
                     return res.status(400).json({ message: 'No valid email addresses provided for non-admin request.' });
                 }
 
                 const emailConditions = emailsToSearch.map((email, index) => {
-                    queryParams[`email_${index}`] = email;
-                    return `REGEXP_CONTAINS(LOWER(Emails), CONCAT('(^|[^a-z0-9.@_-])', @email_${index}, '([^a-z0-9.@_-]|$)'))`;
+                    params[`email_${index}`] = email;
+                    // Changed regex to be more robust for separators (commas, spaces, or start/end of string)
+                    return `REGEXP_CONTAINS(LOWER(Emails), CONCAT('(^|[[:space:],])', @email_${index}, '([[:space:],]|$)'))`;
                 }).join(' OR ');
-                whereClauses.push(`(${emailConditions})`);
 
+                // Query to find relevant DelCodes
                 const findRelevantDelCodesQuery = `
                     SELECT DISTINCT DelCode_w_o__
                     FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
-                    WHERE ${whereClauses.join(' AND ')}
+                    WHERE (${emailConditions})
                 `;
                 console.log('Backend /api/data (List View - Non-Admin): Query to find relevant DelCodes:', findRelevantDelCodesQuery);
-                console.log('Backend /api/data (List View - Non-Admin): Params for DelCode query:', queryParams);
+                console.log('Backend /api/data (List View - Non-Admin): Params for DelCode query:', params);
 
                 const [relevantDelCodesRows] = await bigQueryClient.query({
                     query: findRelevantDelCodesQuery,
-                    params: queryParams
+                    params: params
                 });
 
                 const relevantDelCodes = relevantDelCodesRows.map(row => row.DelCode_w_o__);
                 console.log(`Backend /api/data (List View - Non-Admin): Found ${relevantDelCodes.length} relevant DelCodes:`, relevantDelCodes);
 
                 if (relevantDelCodes.length === 0) {
-                    rows = [];
+                    rows = []; // No relevant workflows found
                     console.log('Backend /api/data (List View - Non-Admin): No relevant DelCodes found for user, returning empty rows.');
                 } else {
+                    // Now, fetch the Step_ID = 0 entry for each of these relevant DelCodes
                     const delCodePlaceholders = relevantDelCodes.map((_, i) => `@delCode_${i}`).join(',');
                     relevantDelCodes.forEach((code, i) => {
-                        queryParams[`delCode_${i}`] = code;
+                        params[`delCode_${i}`] = code;
                     });
-                    
-                    whereClauses.push(`DelCode_w_o__ IN (${delCodePlaceholders})`);
 
                     const fetchStep0ForRelevantDelCodesQuery = `
                         ${baseQuery}
-                        WHERE ${whereClauses.join(' AND ')}
+                        WHERE DelCode_w_o__ IN (${delCodePlaceholders}) AND Step_ID = 0
                         ORDER BY DelCode_w_o__ LIMIT @limit OFFSET @offset;
                     `;
                     console.log('Backend /api/data (List View - Non-Admin): Query to fetch Step_ID=0 for relevant DelCodes:', fetchStep0ForRelevantDelCodesQuery);
-                    console.log('Backend /api/data (List View - Non-Admin): Params for Step_ID=0 query:', queryParams);
+                    console.log('Backend /api/data (List View - Non-Admin): Params for Step_ID=0 query:', params);
                     [rows] = await bigQueryClient.query({
                         query: fetchStep0ForRelevantDelCodesQuery,
-                        params: queryParams
+                        params: params
                     });
-                    console.log(`Backend /api/data (List View - Non-Admin): Fetched ${rows.length} Step_ID=0 rows after filtering by relevant DelCodes. Raw rows:`, rows);
+                    console.log(`Backend /api/data (List View - Non-Admin): Fetched ${rows.length} Step_ID=0 rows after filtering by relevant DelCodes. Raw rows:`, rows); // Log raw rows
                 }
             } else { // Admin logic for DeliveryList page (no specific delCode)
-                let query = `${baseQuery}`;
-                if (whereClauses.length > 0) {
-                    query += ` WHERE ${whereClauses.join(' AND ')}`;
-                }
+                let whereClauses = [];
+                whereClauses.push(`Step_ID = 0`);
+                 // Add planned timestamp condition for admins as well for DeliveryList
+                whereClauses.push(`(
+                    (Planned_Start_Timestamp IS NULL AND Planned_Delivery_Timestamp IS NULL)
+                    OR
+                    (Planned_Start_Timestamp IS NOT NULL AND Planned_Delivery_Timestamp IS NOT NULL)
+                    OR
+                    (Planned_Start_Timestamp IS NOT NULL AND Planned_Delivery_Timestamp IS NULL)
+                    OR
+                    (Planned_Start_Timestamp IS NULL AND Planned_Delivery_Timestamp IS NOT NULL)
+                )`);
+
+                let query = `${baseQuery} WHERE ` + whereClauses.join(' AND ');
                 query += ` ORDER BY DelCode_w_o__ LIMIT @limit OFFSET @offset;`;
-                
-                const options = { query: query, params: queryParams };
+                const options = { query: query, params: params };
                 [rows] = await bigQueryClient.query(options);
-                console.log(`Backend /api/data (List View - Admin): Fetched ${rows.length} Step_ID=0 rows with filters. Raw rows:`, rows);
+                console.log(`Backend /api/data (List View - Admin): Fetched ${rows.length} Step_ID=0 rows. Raw rows:`, rows); // Log raw rows
             }
         }
 
@@ -224,66 +234,9 @@ app.get('/api/data', async (req, res) => {
     }
 });
 
-// NEW API ENDPOINT: To update Planned_Tasks and Total_Tasks for a specific delivery
-app.put('/api/delivery_counts/:delCode', async (req, res) => {
-    const { delCode } = req.params;
-    const { newPlannedTasks, newTotalTasks } = req.body;
-
-    if (newPlannedTasks === undefined && newTotalTasks === undefined) {
-        return res.status(400).send({ error: 'At least one of newPlannedTasks or newTotalTasks must be provided.' });
-    }
-
-    try {
-        let updateFields = [];
-        let params = { delCode };
-        let types = { delCode: 'STRING' };
-
-        if (newPlannedTasks !== undefined) {
-            updateFields.push('Planned_Tasks = @newPlannedTasks');
-            params.newPlannedTasks = newPlannedTasks;
-            types.newPlannedTasks = 'INT64';
-        }
-        if (newTotalTasks !== undefined) {
-            updateFields.push('Total_Tasks = @newTotalTasks');
-            params.newTotalTasks = newTotalTasks;
-            types.newTotalTasks = 'INT64';
-        }
-
-        if (updateFields.length === 0) {
-            return res.status(200).send({ message: 'No fields to update.' });
-        }
-
-        const query = `
-            UPDATE \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
-            SET
-                ${updateFields.join(', ')}
-            WHERE
-                DelCode_w_o__ = @delCode AND Step_ID = 0;
-        `;
-
-        const options = {
-            query: query,
-            params: params,
-            types: types
-        };
-
-        console.log('BigQuery Update Query (Delivery Counts):', query);
-        console.log('BigQuery Update Params (Delivery Counts):', params);
-
-        const [job] = await bigQueryClient.createQueryJob(options);
-        await job.getQueryResults();
-        res.status(200).send({ message: 'Delivery task counts updated successfully.' });
-    } catch (error) {
-        console.error('Error updating delivery task counts in BigQuery:', error.message, error.stack);
-        res.status(500).send({ error: 'Failed to update delivery task counts.' });
-    }
-});
-
-
 app.get('/api/per-key-per-day', async (req, res) => {
     try {
-        // Corrected to use 'Responsibility' as per user's BigQuery schema
-        const query = `SELECT Key, day, duration, Planned_Delivery_Slot, Responsibility FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\``;
+        const query = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\``;
         const [rows] = await bigQueryClient.query(query);
 
         const groupedData = rows.reduce((acc, item) => {
@@ -330,7 +283,7 @@ app.post('/api/post', async (req, res) => {
         Planned_Start_Timestamp,
         Selected_Planned_Start_Timestamp,
         Planned_Delivery_Timestamp,
-        Responsibility, // Main task Responsibility
+        Responsibility,
         Current_Status,
         Email,
         Emails,
@@ -342,10 +295,10 @@ app.post('/api/post', async (req, res) => {
         Updated_at,
         Time_Left_For_Next_Task_dd_hh_mm_ss,
         Card_Corner_Status,
-        sliders // Each slider now contains its own Responsibility
+        sliders
     } = req.body;
 
-    console.log("Backend /api/post: Received data for Key:", Key, req.body);
+    console.log("Hi", req.body);
 
     if (!sliders || sliders.length === 0) {
         return res.status(400).send({ error: 'Slider data is mandatory.' });
@@ -362,7 +315,6 @@ app.post('/api/post', async (req, res) => {
         const [existingTasks] = await bigQueryClient.query(checkOptions);
 
         if (existingTasks.length > 0) {
-            // Update main task table
             const updateQuery = `UPDATE \`${projectId}.${bigQueryDataset}.${bigQueryTable}\` SET
                 Delivery_code = @Delivery_code,
                 DelCode_w_o__ = @DelCode_w_o__,
@@ -380,6 +332,7 @@ app.post('/api/post', async (req, res) => {
                 Total_Tasks = @Total_Tasks,
                 Completed_Tasks = @Completed_Tasks,
                 Planned_Tasks = @Planned_Tasks,
+                Total_Tasks = @Total_Tasks,
                 Percent_Tasks_Completed = @Percent_Tasks_Completed,
                 Created_at = @Created_at,
                 Updated_at = @Updated_at,
@@ -438,10 +391,9 @@ app.post('/api/post', async (req, res) => {
                     Card_Corner_Status: 'STRING',
                 }
             };
+
             await bigQueryClient.createQueryJob(updateOptions);
-            console.log(`Backend /api/post: Successfully updated main task with Key: ${Key}`);
         } else {
-            // Insert logic (unchanged)
             const insertQuery = `INSERT INTO \`${projectId}.${bigQueryDataset}.${bigQueryTable}\` (Key, Delivery_code, DelCode_w_o__, Step_ID, Task_Details, Frequency___Timeline, Client, Short_Description, Planned_Start_Timestamp, Planned_Delivery_Timestamp, Responsibility, Current_Status,Email, Total_Tasks, Completed_Tasks, Planned_Tasks, Percent_Tasks_Completed, Created_at, Updated_at, Time_Left_For_Next_Task_dd_hh_mm_ss, Card_Corner_Status)
             VALUES (@Key, @Delivery_code, @DelCode_w_o__, @Step_ID, @Task_Details, @Frequency___Timeline, @Client, @Short_description, @Planned_Start_Timestamp, @Planned_Delivery_Timestamp, @Responsibility, @Current_Status,@Email, @Total_Tasks, @Completed_Tasks, @Planned_Tasks, @Percent_Tasks_Completed, @Created_at, @Updated_at, @Time_Left_For_Next_Task_dd_hh_mm_ss, @Card_Corner_Status)`;
 
@@ -498,10 +450,9 @@ app.post('/api/post', async (req, res) => {
             };
 
             await bigQueryClient.createQueryJob(insertOptions);
-            console.log(`Backend /api/post: Successfully inserted new task with Key: ${Key}`);
         }
 
-        console.log('Backend /api/post: Processing sliders data:', sliders.length, 'entries');
+        console.log('Received sliders data:', sliders);
 
         const insertOrUpdateSliderQueries = await Promise.all(sliders.map(async (slider) => {
             const selectQuery = {
@@ -521,41 +472,35 @@ app.post('/api/post', async (req, res) => {
             const [sliderRows] = await bigQueryClient.query(selectQuery);
 
             if (sliderRows.length > 0) {
-                // Corrected to use 'Responsibility' as per user's BigQuery schema
                 return {
-                    query: `UPDATE \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\` SET duration = @duration, Responsibility = @Responsibility WHERE Key = @Key AND day = @day AND Planned_Delivery_Slot=@Planned_Delivery_Slot`,
+                    query: `UPDATE \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\` SET duration = @duration WHERE Key = @Key AND day = @day AND Planned_Delivery_Slot=@Planned_Delivery_Slot`,
                     params: {
                         Key: Number(Key),
                         day: slider.day,
                         duration: Number(slider.duration),
                         Planned_Delivery_Slot: slider.slot,
-                        Responsibility: slider.personResponsible || null, // Use from slider data
                     },
                     types: {
                         Key: 'INT64',
                         day: 'STRING',
                         duration: 'INT64',
                         Planned_Delivery_Slot: 'STRING',
-                        Responsibility: 'STRING', // Define type for new column
                     },
                 };
             } else {
-                // Corrected to use 'Responsibility' as per user's BigQuery schema
                 return {
-                    query: `INSERT INTO \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\` (Key, day, duration, Planned_Delivery_Slot, Responsibility) VALUES (@Key, @day, @duration, @Planned_Delivery_Slot, @Responsibility)`,
+                    query: `INSERT INTO \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\` (Key, day, duration,Planned_Delivery_Slot) VALUES (@Key, @day, @duration,@Planned_Delivery_Slot)`,
                     params: {
                         Key: Number(Key),
                         day: slider.day,
                         duration: Number(slider.duration),
-                        Planned_Delivery_Slot: slider.slot,
-                        Responsibility: slider.personResponsible || null, // Use from slider data
+                        Planned_Delivery_Slot: slider.slot
                     },
                     types: {
                         Key: 'INT64',
                         day: 'STRING',
                         duration: 'INT64',
                         Planned_Delivery_Slot: 'STRING',
-                        Responsibility: 'STRING', // Define type for new column
                     },
                 };
             }
@@ -566,7 +511,6 @@ app.post('/api/post', async (req, res) => {
                 await bigQueryClient.createQueryJob(queryOption);
             })
         );
-        console.log('Backend /api/post: Sliders data processed successfully.');
 
         res.status(200).send({ message: 'Task and slider data stored or updated successfully.' });
     } catch (error) {
@@ -575,6 +519,7 @@ app.post('/api/post', async (req, res) => {
     }
 });
 
+// Update Task in BigQuery
 app.put('/api/data/:key', async (req, res) => {
     const { key } = req.params;
     const { taskName, startDate, endDate, assignTo, status } = req.body;
@@ -600,6 +545,7 @@ app.put('/api/data/:key', async (req, res) => {
     }
 });
 
+// Delete Task from BigQuery
 app.delete('/api/data/:deliveryCode', async (req, res) => {
     const { deliveryCode } = req.params;
     console.log("hi", req.params)
