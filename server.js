@@ -68,7 +68,6 @@ app.get('/api/data', async (req, res) => {
     try {
         const limit = parseInt(req.query.limit, 10) || 500;
         const offset = parseInt(req.query.offset, 10) || 0;
-        // Convert rawEmailParam to lowercase at the very beginning for consistency
         const rawEmailParam = req.query.email ? req.query.email.toLowerCase() : null; 
         const requestedDelCode = req.query.delCode;
         
@@ -138,11 +137,31 @@ app.get('/api/data', async (req, res) => {
                 }
             }
         } else {
-            // Logic for DeliveryList page (no specific delCode requested)
+            // Corrected Logic for DeliveryList page (no specific delCode requested)
+            // This entire block handles the main list view, separated by isAdminRequest
             const emailsToSearch = rawEmailParam.split(',').map(email => email.trim().toLowerCase()).filter(email => email !== ''); // Already lowercase
             let params = { limit, offset };
 
-            if (!isAdminRequest) {
+            if (isAdminRequest) { // ADMIN list view logic
+                let whereClauses = [];
+                whereClauses.push(`Step_ID = 0`);
+                 // Add planned timestamp condition for admins as well for DeliveryList
+                whereClauses.push(`(
+                    (Planned_Start_Timestamp IS NULL AND Planned_Delivery_Timestamp IS NULL)
+                    OR
+                    (Planned_Start_Timestamp IS NOT NULL AND Planned_Delivery_Timestamp IS NOT NULL)
+                    OR
+                    (Planned_Start_Timestamp IS NOT NULL AND Planned_Delivery_Timestamp IS NULL)
+                    OR
+                    (Planned_Start_Timestamp IS NULL AND Planned_Delivery_Timestamp IS NOT NULL)
+                )`);
+
+                let query = `${baseQuery} WHERE ` + whereClauses.join(' AND ');
+                query += ` ORDER BY DelCode_w_o__ LIMIT @limit OFFSET @offset;`;
+                const options = { query: query, params: params };
+                [rows] = await bigQueryClient.query(options);
+                console.log(`Backend /api/data (List View - Admin): Fetched ${rows.length} Step_ID=0 rows. Raw rows:`, rows);
+            } else { // NON-ADMIN list view logic
                 if (emailsToSearch.length === 0) {
                     return res.status(400).json({ message: 'No valid email addresses provided for non-admin request.' });
                 }
@@ -153,7 +172,7 @@ app.get('/api/data', async (req, res) => {
                     return `REGEXP_CONTAINS(LOWER(Emails), CONCAT('(^|[[:space:],])', @email_${index}, '([[:space:],]|$)'))`;
                 }).join(' OR ');
 
-                // Query to find relevant DelCodes
+                // Query to find relevant DelCodes (where user is part of any task)
                 const findRelevantDelCodesQuery = `
                     SELECT DISTINCT DelCode_w_o__
                     FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
@@ -191,27 +210,8 @@ app.get('/api/data', async (req, res) => {
                         query: fetchStep0ForRelevantDelCodesQuery,
                         params: params
                     });
-                    console.log(`Backend /api/data (List View - Non-Admin): Fetched ${rows.length} Step_ID=0 rows after filtering by relevant DelCodes. Raw rows:`, rows); // Log raw rows
+                    console.log(`Backend /api/data (List View - Non-Admin): Fetched ${rows.length} Step_ID=0 rows after filtering by relevant DelCodes. Raw rows:`, rows);
                 }
-            } else { // Admin logic for DeliveryList page (no specific delCode)
-                let whereClauses = [];
-                whereClauses.push(`Step_ID = 0`);
-                 // Add planned timestamp condition for admins as well for DeliveryList
-                whereClauses.push(`(
-                    (Planned_Start_Timestamp IS NULL AND Planned_Delivery_Timestamp IS NULL)
-                    OR
-                    (Planned_Start_Timestamp IS NOT NULL AND Planned_Delivery_Timestamp IS NOT NULL)
-                    OR
-                    (Planned_Start_Timestamp IS NOT NULL AND Planned_Delivery_Timestamp IS NULL)
-                    OR
-                    (Planned_Start_Timestamp IS NULL AND Planned_Delivery_Timestamp IS NOT NULL)
-                )`);
-
-                let query = `${baseQuery} WHERE ` + whereClauses.join(' AND ');
-                query += ` ORDER BY DelCode_w_o__ LIMIT @limit OFFSET @offset;`;
-                const options = { query: query, params: params };
-                [rows] = await bigQueryClient.query(options);
-                console.log(`Backend /api/data (List View - Admin): Fetched ${rows.length} Step_ID=0 rows. Raw rows:`, rows); // Log raw rows
             }
         }
 
