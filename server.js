@@ -70,10 +70,13 @@ app.get('/api/data', async (req, res) => {
         const offset = parseInt(req.query.offset, 10) || 0;
         const rawEmailParam = req.query.email ? req.query.email.toLowerCase() : null; 
         const requestedDelCode = req.query.delCode;
+        const searchTerm = req.query.searchTerm ? req.query.searchTerm.toLowerCase() : ''; // Get search term
+        const selectedClient = req.query.selectedClient ? req.query.selectedClient.toLowerCase() : ''; // Get selected client
         
         const isAdminRequest = ADMIN_EMAILS_BACKEND.includes(rawEmailParam);
         console.log(`Backend /api/data: Request from ${rawEmailParam}, isAdminRequest: ${isAdminRequest}`);
         console.log(`Backend /api/data: Requested delCode: ${requestedDelCode}`);
+        console.log(`Backend /api/data: Search Term: "${searchTerm}", Selected Client: "${selectedClient}"`);
 
 
         if (!rawEmailParam && !isAdminRequest) {
@@ -138,29 +141,33 @@ app.get('/api/data', async (req, res) => {
             }
         } else {
             // Corrected Logic for DeliveryList page (no specific delCode requested)
-            // This entire block handles the main list view, separated by isAdminRequest
             const emailsToSearch = rawEmailParam.split(',').map(email => email.trim().toLowerCase()).filter(email => email !== ''); // Already lowercase
             let params = { limit, offset };
+            let whereClauses = []; // Initialize whereClauses here
+
+            // Always filter for Step_ID = 0 for the list view
+            whereClauses.push(`Step_ID = 0`);
+
+            // Add search term filter
+            if (searchTerm) {
+                whereClauses.push(`(REGEXP_CONTAINS(LOWER(DelCode_w_o__), @searchTerm) OR REGEXP_CONTAINS(LOWER(Client), @searchTerm))`);
+                params.searchTerm = searchTerm;
+            }
+
+            // Add selected client filter
+            if (selectedClient) {
+                whereClauses.push(`LOWER(Client) = @selectedClient`);
+                params.selectedClient = selectedClient;
+            }
 
             if (isAdminRequest) { // ADMIN list view logic
-                let whereClauses = [];
-                whereClauses.push(`Step_ID = 0`);
-                 // Add planned timestamp condition for admins as well for DeliveryList
-                whereClauses.push(`(
-                    (Planned_Start_Timestamp IS NULL AND Planned_Delivery_Timestamp IS NULL)
-                    OR
-                    (Planned_Start_Timestamp IS NOT NULL AND Planned_Delivery_Timestamp IS NOT NULL)
-                    OR
-                    (Planned_Start_Timestamp IS NOT NULL AND Planned_Delivery_Timestamp IS NULL)
-                    OR
-                    (Planned_Start_Timestamp IS NULL AND Planned_Delivery_Timestamp IS NOT NULL)
-                )`);
-
-                let query = `${baseQuery} WHERE ` + whereClauses.join(' AND ');
+                // Admins see all Step_ID=0 deliveries with search/client filters
+                let query = `${baseQuery} WHERE ${whereClauses.join(' AND ')}`;
                 query += ` ORDER BY DelCode_w_o__ LIMIT @limit OFFSET @offset;`;
+                
                 const options = { query: query, params: params };
                 [rows] = await bigQueryClient.query(options);
-                console.log(`Backend /api/data (List View - Admin): Fetched ${rows.length} Step_ID=0 rows. Raw rows:`, rows);
+                console.log(`Backend /api/data (List View - Admin): Fetched ${rows.length} Step_ID=0 rows with filters. Raw rows:`, rows);
             } else { // NON-ADMIN list view logic
                 if (emailsToSearch.length === 0) {
                     return res.status(400).json({ message: 'No valid email addresses provided for non-admin request.' });
@@ -168,15 +175,15 @@ app.get('/api/data', async (req, res) => {
 
                 const emailConditions = emailsToSearch.map((email, index) => {
                     params[`email_${index}`] = email;
-                    // Changed regex to be more robust for separators (commas, spaces, or start/end of string)
                     return `REGEXP_CONTAINS(LOWER(Emails), CONCAT('(^|[[:space:],])', @email_${index}, '([[:space:],]|$)'))`;
                 }).join(' OR ');
 
-                // Query to find relevant DelCodes (where user is part of any task)
+                // Query to find relevant DelCodes (where user is part of any task AND matches search/client filters)
                 const findRelevantDelCodesQuery = `
                     SELECT DISTINCT DelCode_w_o__
                     FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
                     WHERE (${emailConditions})
+                    ${searchTerm || selectedClient ? `AND (${whereClauses.filter(clause => !clause.includes('Step_ID')).join(' AND ')})` : ''}
                 `;
                 console.log('Backend /api/data (List View - Non-Admin): Query to find relevant DelCodes:', findRelevantDelCodesQuery);
                 console.log('Backend /api/data (List View - Non-Admin): Params for DelCode query:', params);
@@ -202,6 +209,7 @@ app.get('/api/data', async (req, res) => {
                     const fetchStep0ForRelevantDelCodesQuery = `
                         ${baseQuery}
                         WHERE DelCode_w_o__ IN (${delCodePlaceholders}) AND Step_ID = 0
+                        ${searchTerm || selectedClient ? `AND (${whereClauses.filter(clause => !clause.includes('Step_ID')).join(' AND ')})` : ''}
                         ORDER BY DelCode_w_o__ LIMIT @limit OFFSET @offset;
                     `;
                     console.log('Backend /api/data (List View - Non-Admin): Query to fetch Step_ID=0 for relevant DelCodes:', fetchStep0ForRelevantDelCodesQuery);
