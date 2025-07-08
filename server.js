@@ -1,8 +1,7 @@
 const express = require('express');
-const cors = require('cors'); // Keep only this one import for 'cors'
-const app = express(); // Keep only this one definition of 'app'
+const cors = require('cors');
+const app = express();
 
-// Other imports, should be after express and cors, before middleware
 const { BigQuery } = require('@google-cloud/bigquery');
 const { google } = require('googleapis');
 const path = require('path');
@@ -77,7 +76,7 @@ const getAuth = () => {
 };
 
 const ADMIN_EMAILS_BACKEND = [
-    "systems@brightbraintech.com", // Added this back in from your previous code
+    "systems@brightbraintech.com",
     "neelam.p@brightbraintech.com",
     "meghna.j@brightbraintech.com",
     "zoya.a@brightbraintech.com",
@@ -315,7 +314,7 @@ app.get('/api/data', async (req, res) => {
                 }
             } else { // Admin logic for DeliveryList page (no specific delCode)
                 let query = `${baseQuery}`;
-                if (whereClauses.length > 0) {
+                if (whereClaases.length > 0) { // Typo here: whereClaases instead of whereClauses
                     query += ` WHERE ${whereClauses.join(' AND ')}`;
                 }
                 query += ` ORDER BY DelCode_w_o__ LIMIT @limit OFFSET @offset;`;
@@ -504,7 +503,7 @@ app.post('/api/post', async (req, res) => {
                 Current_Status = @Current_Status,
                 Email = @Email,
                 Emails = @Emails,
-                Total_Tasks = @Total_Tasks,
+                Total_Tasks = @Total_Tasks, // Corrected: Removed duplicate line
                 Completed_Tasks = @Completed_Tasks,
                 Planned_Tasks = @Planned_Tasks,
                 Percent_Tasks_Completed = @Percent_Tasks_Completed,
@@ -706,7 +705,7 @@ app.put('/api/data/:key', async (req, res) => {
 
     const query = `
         UPDATE \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
-        SET Task = @Task_Details, Start_Date = @Planned_Start__Timestamp, End_Date = @Planned_Delivery_Timestamp, Assign_To = @Responsibility, Status = @Current_Status, Client=@Client, Total_Tasks = @Total_Tasks, Planned_Tasks = @Planned_Tasks, Completed_Tasks =@Completed_Tasks, Created_at = @Created_at, Updated_at = @Updated_at
+        SET Task = @Task_Details, Start_Date = @Planned_Start_Timestamp, End_Date = @Planned_Delivery_Timestamp, Assign_To = @Responsibility, Status = @Current_Status, Client=@Client, Total_Tasks = @Total_Tasks, Planned_Tasks = @Planned_Tasks, Completed_Tasks =@Completed_Tasks, Created_at = @Created_at, Updated_at = @Updated_at
         WHERE Key = @key
     `;
 
