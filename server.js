@@ -635,7 +635,7 @@ app.post('/api/post', async (req, res) => {
                 params: {
                     Key: Number(Key),
                     day: slider.day,
-                    Planned_Delivery_Slot: slider.slot,
+                    Planned_Delivery_Slot: String(slider.slot), // Explicitly cast to string
                 },
                 types: {
                     Key: 'INT64',
@@ -653,7 +653,7 @@ app.post('/api/post', async (req, res) => {
                         Key: Number(Key),
                         day: slider.day,
                         duration: Number(slider.duration),
-                        Planned_Delivery_Slot: slider.slot,
+                        Planned_Delivery_Slot: String(slider.slot), // Explicitly cast to string
                         personResponsible: slider.personResponsible || null,
                     },
                     types: {
@@ -671,7 +671,7 @@ app.post('/api/post', async (req, res) => {
                         Key: Number(Key),
                         day: slider.day,
                         duration: Number(slider.duration),
-                        Planned_Delivery_Slot: slider.slot,
+                        Planned_Delivery_Slot: String(slider.slot), // Explicitly cast to string
                         personResponsible: slider.personResponsible || null,
                     },
                     types: {
