@@ -632,60 +632,69 @@ app.post('/api/post', async (req, res) => {
 
         // Operates on bigQueryTable2 (Per_Key_Per_Day)
         const insertOrUpdateSliderQueries = await Promise.all(sliders.map(async (slider) => {
-            const selectQuery = {
-                query: `SELECT duration FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\` WHERE Key = @Key AND day = @day AND Planned_Delivery_Slot=@Planned_Delivery_Slot LIMIT 1`,
-                params: {
-                    Key: Number(Key),
-                    day: slider.day,
-                    Planned_Delivery_Slot: String(slider.slot), // Explicitly cast to string
-                },
-                types: {
-                    Key: 'INT64',
-                    day: 'STRING',
-                    Planned_Delivery_Slot: 'STRING',
-                },
-            };
+    // Determine the correct Key for each slider (it should be the main task's Key)
+    const currentTaskKey = Key; // Key from the main POST request body
 
-            const [sliderRows] = await bigQueryClient.query(selectQuery);
+    const selectQuery = {
+        query: `SELECT duration FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\` WHERE Key = @Key AND day = @day AND Planned_Delivery_Slot=@Planned_Delivery_Slot LIMIT 1`,
+        params: {
+            Key: currentTaskKey, // Use the string Key directly
+            day: slider.day,
+            Planned_Delivery_Slot: String(slider.slot),
+        },
+        types: {
+            Key: 'STRING', // Change this to STRING
+            day: 'STRING',
+            Planned_Delivery_Slot: 'STRING',
+        },
+    };
 
-            if (sliderRows.length > 0) {
-                return {
-                    query: `UPDATE \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\` SET duration = @duration, Responsibility = @personResponsible WHERE Key = @Key AND day = @day AND Planned_Delivery_Slot=@Planned_Delivery_Slot`,
-                    params: {
-                        Key: Number(Key),
-                        day: slider.day,
-                        duration: Number(slider.duration),
-                        Planned_Delivery_Slot: String(slider.slot), // Explicitly cast to string
-                        personResponsible: slider.personResponsible || null,
-                    },
-                    types: {
-                        Key: 'INT64',
-                        day: 'STRING',
-                        duration: 'INT64',
-                        Planned_Delivery_Slot: 'STRING',
-                        personResponsible: 'STRING',
-                    },
-                };
-            } else {
-                return {
-                    query: `INSERT INTO \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\` (Key, day, duration, Planned_Delivery_Slot, Responsibility) VALUES (@Key, @day, @duration, @Planned_Delivery_Slot, @personResponsible)`,
-                    params: {
-                        Key: Number(Key),
-                        day: slider.day,
-                        duration: Number(slider.duration),
-                        Planned_Delivery_Slot: String(slider.slot), // Explicitly cast to string
-                        personResponsible: slider.personResponsible || null,
-                    },
-                    types: {
-                        Key: 'INT64',
-                        day: 'STRING',
-                        duration: 'INT64',
-                        Planned_Delivery_Slot: 'STRING',
-                        personResponsible: 'STRING',
-                    },
-                };
-            }
-        }));
+    const [sliderRows] = await bigQueryClient.query(selectQuery);
+
+    if (sliderRows.length > 0) {
+        // UPDATE query
+        return {
+            query: `UPDATE \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\` SET duration = @duration, Responsibility = @Responsibility, Duration_Unit = @Duration_Unit WHERE Key = @Key AND day = @day AND Planned_Delivery_Slot=@Planned_Delivery_Slot`, // ADD Duration_Unit to SET
+            params: {
+                Key: currentTaskKey,
+                day: slider.day,
+                duration: Number(slider.duration),
+                Planned_Delivery_Slot: String(slider.slot),
+                Responsibility: slider.Responsibility || null, // Use slider.Responsibility
+                Duration_Unit: slider.Duration_Uint || null, // Add Duration_Unit parameter
+            },
+            types: {
+                Key: 'STRING', // Change this to STRING
+                day: 'STRING',
+                duration: 'INT64',
+                Planned_Delivery_Slot: 'STRING',
+                Responsibility: 'STRING',
+                Duration_Unit: 'STRING', // Add Duration_Unit type
+            },
+        };
+    } else {
+        // INSERT query
+        return {
+            query: `INSERT INTO \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\` (Key, day, duration, Planned_Delivery_Slot, Responsibility, Duration_Unit) VALUES (@Key, @day, @duration, @Planned_Delivery_Slot, @Responsibility, @Duration_Unit)`, // ADD Duration_Unit to columns and VALUES
+            params: {
+                Key: currentTaskKey,
+                day: slider.day,
+                duration: Number(slider.duration),
+                Planned_Delivery_Slot: String(slider.slot),
+                Responsibility: slider.Responsibility || null, // Use slider.Responsibility
+                Duration_Unit: slider.Duration_Uint || null, // Add Duration_Unit parameter
+            },
+            types: {
+                Key: 'STRING', // Change this to STRING
+                day: 'STRING',
+                duration: 'INT64',
+                Planned_Delivery_Slot: 'STRING',
+                Responsibility: 'STRING',
+                Duration_Unit: 'STRING', // Add Duration_Unit type
+            },
+        };
+    }
+}));
 
         await Promise.all(
             insertOrUpdateSliderQueries.map(async (queryOption) => {
