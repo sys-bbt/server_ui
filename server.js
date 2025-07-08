@@ -121,9 +121,6 @@ app.get('/api/person-mappings', async (req, res) => {
         const headers = rows[0];
         const dataRows = rows.slice(1);
 
-        const emailToPersonMap = {};
-        const allAvailablePersons = new Set();
-
         const employeeNameIndex = headers.indexOf('Current_Employes');
         const emailIndex = headers.indexOf('Emp_Emails');
 
@@ -491,7 +488,7 @@ app.post('/api/post', async (req, res) => {
         if (existingTasks.length > 0) {
             const updateQuery = `UPDATE \`${projectId}.${bigQueryDataset}.${bigQueryTable}\` SET
                 Delivery_code = @Delivery_code,
-                DelCode_w_o__ = @DelCode_w_o__, // Direct assignment (as in old code)
+                DelCode_w_o__ = @DelCode_w_o__,
                 Step_ID = @Step_ID,
                 Task_Details = @Task_Details,
                 Frequency___Timeline = @Frequency___Timeline,
@@ -503,7 +500,7 @@ app.post('/api/post', async (req, res) => {
                 Current_Status = @Current_Status,
                 Email = @Email,
                 Emails = @Emails,
-                Total_Tasks = @Total_Tasks, // Corrected: Removed duplicate line
+                Total_Tasks = @Total_Tasks,
                 Completed_Tasks = @Completed_Tasks,
                 Planned_Tasks = @Planned_Tasks,
                 Percent_Tasks_Completed = @Percent_Tasks_Completed,
@@ -518,7 +515,7 @@ app.post('/api/post', async (req, res) => {
                 params: {
                     Key,
                     Delivery_code,
-                    DelCode_w_o__,
+                    DelCode_w_o__: String(DelCode_w_o__), // Explicitly cast to string
                     Step_ID,
                     Task_Details,
                     Frequency___Timeline,
@@ -575,7 +572,7 @@ app.post('/api/post', async (req, res) => {
                 params: {
                     Key,
                     Delivery_code,
-                    DelCode_w_o__, // Direct insertion (as in old code)
+                    DelCode_w_o__: String(DelCode_w_o__), // Explicitly cast to string
                     Step_ID,
                     Task_Details,
                     Frequency___Timeline,
