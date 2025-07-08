@@ -121,6 +121,11 @@ app.get('/api/person-mappings', async (req, res) => {
         const headers = rows[0];
         const dataRows = rows.slice(1);
 
+        // *** CRITICAL FIX: Ensure these variables are declared! ***
+        const emailToPersonMap = {};
+        const allAvailablePersons = new Set();
+        // *********************************************************
+
         const employeeNameIndex = headers.indexOf('Current_Employes');
         const emailIndex = headers.indexOf('Emp_Emails');
 
@@ -311,7 +316,7 @@ app.get('/api/data', async (req, res) => {
                 }
             } else { // Admin logic for DeliveryList page (no specific delCode)
                 let query = `${baseQuery}`;
-                if (whereClauses.length > 0) { // CORRECTED: Changed 'whereClaases' to 'whereClauses'
+                if (whereClauses.length > 0) {
                     query += ` WHERE ${whereClauses.join(' AND ')}`;
                 }
                 query += ` ORDER BY DelCode_w_o__ LIMIT @limit OFFSET @offset;`;
