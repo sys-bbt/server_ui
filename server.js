@@ -40,7 +40,7 @@ app.use(cors({
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE', // Ensure all methods your API uses are listed
     credentials: true, // Keep this if your frontend sends cookies or auth tokens
     allowedHeaders: ['Content-Type', 'Authorization'], // Add any custom headers your frontend sends (e.g., for JWTs)
-    optionsSuccessStatus: 204 // Recommended for preflight requests
+    optionsSuccessStatus: 200 // Recommended for preflight requests
 }));
 // --- END CORRECTED CORS Configuration ---
 
