@@ -643,7 +643,7 @@ app.post('/api/post', async (req, res) => {
             Planned_Delivery_Slot: String(slider.slot),
         },
         types: {
-            Key: 'STRING', // Change this to STRING
+            Key: 'INT64', // Change this to STRING
             day: 'STRING',
             Planned_Delivery_Slot: 'STRING',
         },
@@ -664,7 +664,7 @@ app.post('/api/post', async (req, res) => {
                 Duration_Unit: slider.Duration_Uint || null, // Add Duration_Unit parameter
             },
             types: {
-                Key: 'STRING', // Change this to STRING
+                Key: 'INT64', // Change this to STRING
                 day: 'STRING',
                 duration: 'INT64',
                 Planned_Delivery_Slot: 'STRING',
@@ -685,7 +685,7 @@ app.post('/api/post', async (req, res) => {
                 Duration_Unit: slider.Duration_Uint || null, // Add Duration_Unit parameter
             },
             types: {
-                Key: 'STRING', // Change this to STRING
+                Key: 'INT64', // Change this to STRING
                 day: 'STRING',
                 duration: 'INT64',
                 Planned_Delivery_Slot: 'STRING',
