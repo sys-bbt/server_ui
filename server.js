@@ -314,7 +314,7 @@ app.get('/api/data', async (req, res) => {
                 }
             } else { // Admin logic for DeliveryList page (no specific delCode)
                 let query = `${baseQuery}`;
-                if (whereClaases.length > 0) { // Typo here: whereClaases instead of whereClauses
+                if (whereClauses.length > 0) { // CORRECTED: Changed 'whereClaases' to 'whereClauses'
                     query += ` WHERE ${whereClauses.join(' AND ')}`;
                 }
                 query += ` ORDER BY DelCode_w_o__ LIMIT @limit OFFSET @offset;`;
