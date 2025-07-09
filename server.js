@@ -64,6 +64,7 @@ app.get('/api/persons', async (req, res) => {
 
 
 app.get('/api/data', async (req, res) => {
+    let rows; // Declare rows here so it's accessible outside the if/else
     try {
         const limit = parseInt(req.query.limit, 10) || 500;
         const offset = parseInt(req.query.offset, 10) || 0;
@@ -189,6 +190,11 @@ app.get('/api/data', async (req, res) => {
                 params: params,
             };
             [rows] = await bigQueryClient.query(options);
+
+            // *** ADDED CONSOLE LOG HERE ***
+            console.log("Backend: Data for frontend (first 5 rows):", rows.slice(0, 5));
+            // *****************************
+
             console.log(`Backend /api/data (List View): Fetched ${rows.length} rows.`);
         }
         res.json(rows);
