@@ -69,7 +69,8 @@ initializeGoogleSheetsAPI();
 // If /api/data, /api/per-key-per-day, /api/per-person-per-day are from BigQuery, keep this block.
 // Otherwise, remove it and adjust those routes to use Google Sheets too.
 let bigquery;
-if (process.env.USE_BIGQUERY === 'true') { // Example: use env var to control BigQuery initialization
+// Ensure this condition is true for BigQuery to initialize
+if (process.env.USE_BIGQUERY === 'true' || process.env.NODE_ENV === 'production') { // Added NODE_ENV for robustness
     try {
         const { BigQuery } = require('@google-cloud/bigquery');
         if (process.env.NODE_ENV === 'production') {
@@ -81,6 +82,7 @@ if (process.env.USE_BIGQUERY === 'true') { // Example: use env var to control Bi
                 },
             });
         } else {
+            // For local development
             const serviceAccountKeyPath = path.join(__dirname, 'path/to/your/bigquery-service-account-key.json'); // ADJUST THIS PATH
             bigquery = new BigQuery({
                 keyFilename: serviceAccountKeyPath,
@@ -90,10 +92,11 @@ if (process.env.USE_BIGQUERY === 'true') { // Example: use env var to control Bi
         console.log('BigQuery client initialized successfully.');
     } catch (error) {
         console.error('Failed to initialize BigQuery client:', error);
-        // process.exit(1); // Only exit if BigQuery is critical for server to function
+        // Do NOT process.exit(1) if you have other independent services like Google Sheets API
+        // But log the error clearly.
     }
 } else {
-    console.log('BigQuery client initialization skipped (USE_BIGQUERY not true).');
+    console.log('BigQuery client initialization skipped (USE_BIGQUERY not true and not in production).');
 }
 
 
