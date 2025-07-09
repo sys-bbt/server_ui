@@ -188,7 +188,7 @@ app.get('/api/data', async (req, res) => {
 
                 // --- TEMPORARY DEBUG CHANGE: FORCE OFFSET TO 0 FOR NON-ADMIN LIST VIEW ---
                 params.limit = limit;
-                params.offset = 0; // Temporarily force offset to 0 for debugging
+                params.offset = offset; // Temporarily force offset to 0 for debugging
                 // --- END TEMPORARY DEBUG CHANGE ---
             }
 
