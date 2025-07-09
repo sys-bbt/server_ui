@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 const express = require('express');
 const { BigQuery } = require('@google-cloud/bigquery');
 const cors = require('cors');
@@ -61,7 +60,6 @@ app.get('/api/persons', async (req, res) => {
     } catch (err) {
         console.error('Error fetching distinct persons from BigQuery:', err.message, err.stack);
         res.status(500).json({ message: 'Failed to fetch persons list.', error: err.message, stack: err.stack });
-=======
 // server.js
 
 const express = require('express');
@@ -197,12 +195,10 @@ app.get('/api/data', async (req, res) => {
     } catch (error) {
         console.error("Error fetching data from BigQuery (Delivery Details):", error);
         res.status(500).json({ error: 'Failed to fetch delivery data.' });
->>>>>>> 10125357c452ead17abc74b536f50d9762603187
     }
 });
 
 
-<<<<<<< HEAD
 app.get('/api/data', async (req, res) => {
     try {
         const limit = parseInt(req.query.limit, 10) || 500;
@@ -713,7 +709,6 @@ app.delete('/api/data/:deliveryCode', async (req, res) => {
     } catch (error) {
         console.error('Error deleting tasks from BigQuery:', error);
         res.status(500).send({ error: 'Failed to delete tasks from BigQuery.' });
-=======
 // NEW ENDPOINT: /api/people-to-email-mapping (USING GOOGLE SHEETS)
 app.get('/api/people-to-email-mapping', async (req, res) => {
     if (!sheets) {
@@ -956,18 +951,13 @@ app.post('/api/post', async (req, res) => {
             console.error("BigQuery specific error reason:", error.errors[0].reason);
         }
         res.status(500).json({ error: `Failed to update task: ${error.message}` });
->>>>>>> 10125357c452ead17abc74b536f50d9762603187
     }
 });
 
-
-<<<<<<< HEAD
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
-=======
 // Start the server
 app.listen(port, () => {
     console.log(`Server listening at http://localhost:${port}`);
->>>>>>> 10125357c452ead17abc74b536f50d9762603187
 });
