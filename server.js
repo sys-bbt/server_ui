@@ -3,16 +3,14 @@ const { BigQuery } = require('@google-cloud/bigquery');
 const cors = require('cors');
 const path = require('path');
 const dotenv = require('dotenv');
-const { google } = require('googleapis'); // For Google Sheets
-const Joi = require('joi'); // For validation
 
 dotenv.config();
 
 const projectId = process.env.GOOGLE_PROJECT_ID;
 const bigQueryDataset = process.env.BIGQUERY_DATASET;
 const bigQueryTable = process.env.BIGQUERY_TABLE; // Your main task table
-const bigQueryTable2 = "Per_Key_Per_Day"; // For per-key per-day tracking
-const bigQueryTable3 = "Per_Person_Per_Day"; // For per-person per-day tracking
+const bigQueryTable2 = "Per_Key_Per_Day";
+const bigQueryTable3 = "Per_Person_Per_Day";
 
 const app = express();
 
@@ -20,7 +18,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Debug logging for BigQuery credentials
 console.log('DEBUG: GOOGLE_PROJECT_ID:', process.env.GOOGLE_PROJECT_ID);
 console.log('DEBUG: BIGQUERY_CLIENT_EMAIL:', process.env.BIGQUERY_CLIENT_EMAIL);
 console.log('DEBUG: BIGQUERY_PRIVATE_KEY exists:', !!process.env.BIGQUERY_PRIVATE_KEY);
@@ -30,315 +27,288 @@ if (process.env.BIGQUERY_PRIVATE_KEY) {
     console.log('DEBUG: Private key contains \\n:', process.env.BIGQUERY_PRIVATE_KEY.includes('\\n'));
 }
 
-// BigQuery Client Setup
 const bigQueryClient = new BigQuery({
-    projectId: projectId,
+    projectId: process.env.GOOGLE_PROJECT_ID,
     credentials: {
         client_email: process.env.BIGQUERY_CLIENT_EMAIL,
-        private_key: process.env.BIGQUERY_PRIVATE_KEY.replace(/\\n/g, '\n'),
+        private_key: process.env.BIGQUERY_PRIVATE_KEY?.replace(/\\n/g, '\n'),
     },
+    scopes: ['https://www.googleapis.com/auth/bigquery'],
 });
 
-// Google Sheets Client Setup
-const sheetsAuth = new google.auth.GoogleAuth({
-    credentials: {
-        client_email: process.env.GOOGLE_SHEET_CLIENT_EMAIL,
-        private_key: process.env.GOOGLE_SHEET_PRIVATE_KEY.replace(/\\n/g, '\n'),
-    },
-    scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'], // Read-only scope
-});
+const ADMIN_EMAILS_BACKEND = [
+    "neelam.p@brightbraintech.com",
+    "meghna.j@brightbraintech.com",
+    "zoya.a@brightbraintech.com",
+    "shweta.g@brightbraintech.com",
+    "hitesh.r@brightbraintech.com"
+];
 
-let sheetsClient;
-
-async function initializeSheetsClient() {
+app.get('/api/persons', async (req, res) => {
     try {
-        sheetsClient = google.sheets({ version: 'v4', auth: sheetsAuth });
-        console.log('Google Sheets client initialized successfully.');
-    } catch (error) {
-        console.error('Error initializing Google Sheets client:', error);
-        // Exit process or handle error appropriately
-        process.exit(1);
-    }
-}
-initializeSheetsClient();
-
-
-// Joi Validation Schema for update-task-status
-const updateTaskSchema = Joi.object({
-    key: Joi.number().integer().required(),
-    taskName: Joi.string().required(),
-    startDate: Joi.date().iso().allow(null, ''),
-    endDate: Joi.date().iso().allow(null, ''),
-    assignTo: Joi.string().required(),
-    status: Joi.string().valid('Scheduled', 'In Progress', 'Paused', 'Completed').required(),
-    actualHours: Joi.number().integer().min(0).allow(null),
-});
-
-// Endpoint to fetch people mapping from Google Sheet
-app.get('/api/people-mapping', async (req, res) => {
-    try {
-        if (!sheetsClient) {
-            await initializeSheetsClient(); // Ensure client is initialized
-        }
-
-        const sheetId = process.env.GOOGLE_SHEET_ID;
-        const sheetRange = process.env.GOOGLE_SHEET_RANGE || 'Sheet1!A:Z'; // Default range
-
-        const response = await sheetsClient.spreadsheets.values.get({
-            spreadsheetId: sheetId,
-            range: sheetRange,
-        });
-
-        const rows = response.data.values;
-        if (!rows || rows.length === 0) {
-            return res.status(200).json([]); // Return empty array if no data
-        }
-
-        // Assuming the first row is headers
-        const headers = rows[0];
-        const peopleMapping = rows.slice(1).map(row => {
-            let obj = {};
-            headers.forEach((header, index) => {
-                obj[header] = row[index];
-            });
-            return obj;
-        });
-
-        res.status(200).json(peopleMapping);
-    } catch (error) {
-        console.error('Error fetching people mapping from Google Sheet:', error);
-        res.status(500).json({ error: 'Failed to fetch people mapping data from Google Sheet.' });
+        const query = `
+            SELECT DISTINCT Responsibility
+            FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
+            WHERE Responsibility IS NOT NULL AND Responsibility != ''
+            ORDER BY Responsibility;
+        `;
+        const [rows] = await bigQueryClient.query(query);
+        const persons = rows.map(row => row.Responsibility);
+        console.log('Fetched distinct persons from BigQuery:', persons);
+        res.status(200).json(persons);
+    } catch (err) {
+        console.error('Error fetching distinct persons from BigQuery:', err.message, err.stack);
+        res.status(500).json({ message: 'Failed to fetch persons list.', error: err.message, stack: err.stack });
     }
 });
 
-// Fetch all deliveries or filter by client/search term with pagination
+
 app.get('/api/data', async (req, res) => {
-    const { page = 0, limit = 10, client, search, email } = req.query; // <--- ADD 'email' here
-
-    const offset = parseInt(page) * parseInt(limit);
-
-    let query = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\``;
-    let conditions = [];
-    let params = {};
-
-    if (client) {
-        conditions.push('Client = @client');
-        params.client = client;
-    }
-
-    if (search) {
-        conditions.push(
-            `(LOWER(Task_Details) LIKE LOWER(@search) OR LOWER(DelCode_w_o__) LIKE LOWER(@search))`
-        );
-        params.search = `%${search}%`;
-    }
-
-    // >>>>>>>>>>>>>> ADD THIS BLOCK FOR EMAIL FILTERING <<<<<<<<<<<<<<<<
-    if (email) { // Check if 'email' query parameter exists
-        conditions.push('Emails = @email'); // Assuming 'Emails' column stores the email
-        params.email = email;
-    }
-    // >>>>>>>>>>>>>> END OF ADDITION <<<<<<<<<<<<<<<<
-
-    if (conditions.length > 0) {
-        query += ' WHERE ' + conditions.join(' AND ');
-    }
-
-    // Ensure this 'Initiated_Timestamp' is the correct column name from your BigQuery table.
-    // If your column is named differently (e.g., 'start_date', 'timestamp_created'),
-    // replace 'Initiated_Timestamp' with the correct name.
-    query += ` ORDER BY Initiated_Timestamp DESC LIMIT @limit OFFSET @offset`;
-    params.limit = parseInt(limit);
-    params.offset = offset;
-
-    const options = {
-        query: query,
-        params: params,
-        location: 'US',
-    };
-
     try {
-        const [job] = await bigQueryClient.createQueryJob(options);
-        const [rows] = await job.getQueryResults();
-        res.status(200).json(rows);
-    } catch (error) {
-        console.error('Error fetching deliveries from BigQuery:', error);
-        res.status(500).json({ error: 'Failed to fetch deliveries from BigQuery.' });
-    }
-});
+        const limit = parseInt(req.query.limit, 10) || 500;
+        const offset = parseInt(req.query.offset, 10) || 0;
+        const rawEmailParam = req.query.email ? req.query.email.toLowerCase() : null; 
+        const requestedDelCode = req.query.delCode;
+        const searchTerm = req.query.searchTerm ? req.query.searchTerm.toLowerCase() : ''; // Get search term
+        const selectedClient = req.query.selectedClient ? req.query.selectedClient.toLowerCase() : ''; // Get selected client
+        
+        const isAdminRequest = ADMIN_EMAILS_BACKEND.includes(rawEmailParam);
+        console.log(`Backend /api/data: Request from ${rawEmailParam}, isAdminRequest: ${isAdminRequest}`);
+        console.log(`Backend /api/data: Requested delCode: ${requestedDelCode}`);
+        console.log(`Backend /api/data: Search Term: "${searchTerm}", Selected Client: "${selectedClient}"`);
 
-// New endpoint to fetch delivery/task details by DelCode
-// Add this new endpoint to your server.js around Line 134 (after the previous app.get('/api/data') block)
-app.get('/api/delivery/:delCode', async (req, res) => {
-    const { delCode } = req.params;
-    console.log(`Server: Received request for delivery details for delCode: ${delCode}`);
 
-    if (!bigQueryClient) {
-        return res.status(500).json({ error: 'BigQuery client not initialized.' });
-    }
-
-    if (!delCode) {
-        return res.status(400).json({ error: 'Delivery Code is required.' });
-    }
-
-    const query = `
-        SELECT Key, Delivery_code, DelCode_w_o__, Step_ID, Task_Details, Frequency___Timeline, Client, Short_Description, Planned_Start_Timestamp, Planned_Delivery_Timestamp, Responsibility, Current_Status, Email, Emails, Total_Tasks, Completed_Tasks, Planned_Tasks, Percent_Tasks_Completed, Created_at, Updated_at, Time_Left_For_Next_Task_dd_hh_mm_ss, Card_Corner_Status
-        FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
-        WHERE DelCode_w_o__ = @delCode
-    `;
-    const options = {
-        query: query,
-        params: { delCode },
-    };
-
-    try {
-        const [job] = await bigQueryClient.createQueryJob(options);
-        const [rows] = await job.getQueryResults();
-
-        if (rows.length === 0) {
-            return res.status(404).json({ message: 'Delivery not found.' });
+        if (!rawEmailParam && !isAdminRequest) {
+            return res.status(400).json({ message: 'Email is required for non-admin requests' });
         }
 
-        res.status(200).json(rows); // Return all tasks associated with the delivery code
+        let baseQuery = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\``;
+        let rows = [];
+
+        if (requestedDelCode) { // Logic for DeliveryDetail page (specific delCode requested)
+            let delCodeWhereClause = `WHERE DelCode_w_o__ = @requestedDelCode`;
+            let delCodeParams = { requestedDelCode: requestedDelCode };
+
+            if (isAdminRequest) {
+                // Admins see all tasks for the requested delCode
+                const options = {
+                    query: `${baseQuery} ${delCodeWhereClause} ORDER BY Step_ID ASC;`,
+                    params: delCodeParams,
+                };
+                [rows] = await bigQueryClient.query(options);
+                console.log(`Backend /api/data (Detail View - Admin): Fetched ${rows.length} rows for delCode ${requestedDelCode}.`);
+            } else {
+                // Non-admins: Always get Step_ID=0 + their assigned tasks for this delCode
+                // Query 1: Get the Step_ID=0 entry for this delCode (unconditionally)
+                const queryStep0 = `${baseQuery} WHERE DelCode_w_o__ = @requestedDelCode AND Step_ID = 0;`;
+                const optionsStep0 = {
+                    query: queryStep0,
+                    params: delCodeParams,
+                };
+                const [rowsStep0] = await bigQueryClient.query(optionsStep0);
+                console.log(`Backend /api/data (Detail View - Non-Admin): Fetched ${rowsStep0.length} Step_ID=0 row(s) for delCode ${requestedDelCode}.`);
+
+                // Query 2: Get all tasks (Step_ID != 0) for this delCode assigned to the user
+                const emailsToSearch = rawEmailParam.split(',').map(email => email.trim().toLowerCase()).filter(email => email !== ''); // Already lowercase
+                let queryTasks = '';
+                let paramsTasks = { requestedDelCode: requestedDelCode };
+
+                if (emailsToSearch.length > 0) {
+                    const emailConditions = emailsToSearch.map((email, index) => {
+                        paramsTasks[`email_${index}`] = email;
+                        // Changed regex to be more robust for separators (commas, spaces, or start/end of string)
+                        return `REGEXP_CONTAINS(LOWER(Emails), CONCAT('(^|[[:space:],])', @email_${index}, '([[:space:],]|$)'))`;
+                    }).join(' OR ');
+
+                    queryTasks = `${baseQuery} WHERE DelCode_w_o__ = @requestedDelCode AND Step_ID != 0 AND (${emailConditions});`;
+                    const optionsTasks = {
+                        query: queryTasks,
+                        params: paramsTasks,
+                    };
+                    const [rowsTasks] = await bigQueryClient.query(optionsTasks);
+                    console.log(`Backend /api/data (Detail View - Non-Admin): Fetched ${rowsTasks.length} assigned task row(s) for delCode ${requestedDelCode}.`);
+
+                    // Combine Step_ID=0 row(s) with assigned tasks, ensuring no duplicates if Step_ID=0 is also assigned
+                    rows = [...rowsStep0, ...rowsTasks.filter(task => !rowsStep0.some(s0 => s0.Key === task.Key))];
+                } else {
+                    // If no valid emails for non-admin, only return Step_ID = 0 tasks
+                    rows = rowsStep0;
+                    console.log(`Backend /api/data (Detail View - Non-Admin): No valid emails, returning only Step_ID=0 for delCode ${requestedDelCode}.`);
+                }
+            }
+        } else { // Logic for DeliveryList page (general list view)
+            let whereClauses = [];
+            let params = {};
+
+            // Add client filter if selected
+            if (selectedClient) {
+                whereClauses.push(`LOWER(Client) = @selectedClient`);
+                params.selectedClient = selectedClient;
+            }
+
+            // Add search term filter if provided
+            if (searchTerm) {
+                const searchCondition = `(LOWER(Delivery_code) LIKE @searchTerm OR LOWER(Short_Description) LIKE @searchTerm OR LOWER(Client) LIKE @searchTerm)`;
+                whereClauses.push(searchCondition);
+                params.searchTerm = `%${searchTerm}%`;
+            }
+
+            // If not an admin, filter by email
+            if (!isAdminRequest) {
+                const emailsToSearch = rawEmailParam.split(',').map(email => email.trim().toLowerCase()).filter(email => email !== '');
+                if (emailsToSearch.length > 0) {
+                    const emailConditions = emailsToSearch.map((email, index) => {
+                        params[`email_${index}`] = email;
+                        return `REGEXP_CONTAINS(LOWER(Emails), CONCAT('(^|[[:space:],])', @email_${index}, '([[:space:],]|$)'))`;
+                    }).join(' OR ');
+                    whereClauses.push(`(${emailConditions})`);
+                } else {
+                    // If no email for non-admin, return empty
+                    return res.status(200).json([]);
+                }
+            }
+
+            const whereClause = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+            const query = `${baseQuery} ${whereClause} ORDER BY Created_at DESC LIMIT @limit OFFSET @offset;`;
+            params.limit = limit;
+            params.offset = offset;
+
+            const options = {
+                query: query,
+                params: params,
+            };
+            [rows] = await bigQueryClient.query(options);
+            console.log(`Backend /api/data (List View): Fetched ${rows.length} rows.`);
+        }
+        res.json(rows);
     } catch (error) {
-        console.error('Error fetching delivery details from BigQuery:', error);
-        res.status(500).json({ error: 'Failed to fetch delivery details from BigQuery.' });
+        console.error("Error fetching data from BigQuery (general):", error);
+        res.status(500).json({ error: 'Failed to fetch delivery data.', details: error.message });
     }
 });
 
 
-// Endpoint to fetch tasks by Key for per-key-per-day data
-app.get('/api/per-key-per-day', async (req, res) => {
-    const { key } = req.query; // Expecting 'key' as a query parameter
+// Endpoint to handle updating task status
+app.put('/api/update-task-status', async (req, res) => {
+    const { key, startDate, endDate, hours, deliverySlot, personResponsible, numberOfDays } = req.body;
 
     if (!key) {
         return res.status(400).json({ error: 'Task Key is required.' });
     }
 
-    const query = `
-        SELECT *
-        FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\`
-        WHERE Key = @key
-    `;
-
-    const options = {
-        query: query,
-        params: { key: parseInt(key) },
-        location: 'US',
-    };
-
     try {
-        const [job] = await bigQueryClient.createQueryJob(options);
-        const [rows] = await job.getQueryResults();
-        res.status(200).json(rows);
-    } catch (error) {
-        console.error('Error fetching per-key-per-day data from BigQuery:', error);
-        res.status(500).json({ error: 'Failed to fetch per-key-per-day data.' });
-    }
-});
+        // 1. Update the main task table (bigQueryTable)
+        const updateTaskQuery = `
+            UPDATE \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
+            SET
+                Planned_Start_Timestamp = @startDate,
+                Planned_Delivery_Timestamp = @endDate,
+                Responsibility = @personResponsible,
+                Updated_at = CURRENT_TIMESTAMP()
+            WHERE
+                Key = @key;
+        `;
+
+        const taskUpdateOptions = {
+            query: updateTaskQuery,
+            params: {
+                key: parseInt(key),
+                startDate: startDate ? new Date(startDate) : null,
+                endDate: endDate ? new Date(endDate) : null,
+                personResponsible: personResponsible || null,
+            },
+        };
+
+        await bigQueryClient.query(taskUpdateOptions);
+        console.log(`Task with Key ${key} updated in ${bigQueryTable}.`);
 
 
-// Update Task Status (including Joi validation and Per_Key_Per_Day / Per_Person_Per_Day updates)
-app.put('/api/update-task-status', async (req, res) => {
-    const { key, taskName, startDate, endDate, assignTo, status, actualHours, newSchedules } = req.body;
+        // 2. Upsert into Per_Key_Per_Day table (bigQueryTable2)
+        // Delete existing entries for this key to ensure clean upsert
+        const deletePerKeyQuery = `
+            DELETE FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\`
+            WHERE Key = @key;
+        `;
+        await bigQueryClient.query({ query: deletePerKeyQuery, params: { key: parseInt(key) } });
+        console.log(`Existing entries for Key ${key} deleted from ${bigQueryTable2}.`);
 
-    // Validate request body using Joi
-    const { error } = updateTaskSchema.validate({
-        key, taskName, startDate, endDate, assignTo, status, actualHours
-    });
-
-    if (error) {
-        return res.status(400).send({ error: error.details[0].message });
-    }
-
-    // Update main task table
-    const updateMainTaskQuery = `
-        UPDATE \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
-        SET
-            Task_Details = @taskName,
-            Planned_Start_Timestamp = @startDate,
-            Planned_Delivery_Timestamp = @endDate,
-            Responsibility = @assignTo,
-            Status = @status,
-            Task_Duration_In_Minutes = @actualHours
-        WHERE
-            Key = @key
-    `;
-
-    const mainTaskOptions = {
-        query: updateMainTaskQuery,
-        params: {
-            key: parseInt(key),
-            taskName,
-            startDate,
-            endDate,
-            assignTo,
-            status,
-            actualHours: actualHours !== null ? parseInt(actualHours) : null
-        },
-    };
-
-    try {
-        // Execute main task update
-        const [mainJob] = await bigQueryClient.createQueryJob(mainTaskOptions);
-        await mainJob.getQueryResults();
-        console.log(`Task with Key ${key} updated in main table.`);
-
-        // Process and upsert into Per_Key_Per_Day table if newSchedules are provided
-        if (newSchedules && Array.isArray(newSchedules) && newSchedules.length > 0) {
-            for (const schedule of newSchedules) {
-                const { date, duration } = schedule;
-                const mergePerKeyQuery = `
-                    MERGE \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\` T
-                    USING (SELECT @key as Key, @date as Day, @duration as Duration_In_Minutes) S
-                    ON T.Key = S.Key AND T.Day = S.Day
-                    WHEN MATCHED THEN
-                        UPDATE SET Duration_In_Minutes = S.Duration_In_Minutes
-                    WHEN NOT MATCHED THEN
-                        INSERT (Key, Day, Duration_In_Minutes)
-                        VALUES (S.Key, S.Day, S.Duration_In_Minutes);
-                `;
-                const perKeyOptions = {
-                    query: mergePerKeyQuery,
-                    params: { key: parseInt(key), date, duration: parseInt(duration) },
-                };
-                await bigQueryClient.query(perKeyOptions);
-            }
-            console.log('Per-key-per-day entries upserted successfully.');
+        // Insert new entries for Per_Key_Per_Day
+        for (const day of Object.keys(hours)) {
+            const duration = hours[day]; // Duration in minutes for that day
+            const mergePerKeyQuery = `
+                INSERT INTO \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\` (Key, Day, Duration_In_Minutes)
+                VALUES (@key, @day, @duration);
+            `;
+            const perKeyOptions = {
+                query: mergePerKeyQuery,
+                params: {
+                    key: parseInt(key),
+                    day: day,
+                    duration: parseInt(duration),
+                },
+            };
+            await bigQueryClient.query(perKeyOptions);
         }
+        console.log('Per-key-per-day entries upserted successfully.');
 
-        // Process and upsert into Per_Person_Per_Day table based on newSchedules and assignTo
-        if (newSchedules && Array.isArray(newSchedules) && newSchedules.length > 0 && assignTo) {
-            // Aggregate duration per person per day from newSchedules for the assigned person
-            const perPersonDailyDurations = {};
-            newSchedules.forEach(schedule => {
-                if (perPersonDailyDurations[schedule.date]) {
-                    perPersonDailyDurations[schedule.date] += parseInt(schedule.duration);
-                } else {
-                    perPersonDailyDurations[schedule.date] = parseInt(schedule.duration);
-                }
-            });
+        // 3. Upsert into Per_Person_Per_Day table (bigQueryTable3)
+        // This is more complex as it requires summing durations for a person per day.
+        // It's generally better to calculate this on the fly or in a materialized view
+        // if performance is critical for reporting. For updates, we'll re-calculate for simplicity.
 
-            for (const day in perPersonDailyDurations) {
-                const mergePerPersonQuery = `
-                    MERGE \`${projectId}.${bigQueryDataset}.${bigQueryTable3}\` T
-                    USING (SELECT @assignTo as Responsibility, @day as Day, @duration as Duration_In_Minutes) S
-                    ON T.Responsibility = S.Responsibility AND T.Day = S.Day
-                    WHEN MATCHED THEN
-                        UPDATE SET Duration_In_Minutes = S.Duration_In_Minutes
-                    WHEN NOT MATCHED THEN
-                        INSERT (Responsibility, Day, Duration_In_Minutes)
-                        VALUES (S.Responsibility, S.Day, S.Duration_In_Minutes);
-                `;
-                const perPersonOptions = {
-                    query: mergePerPersonQuery,
-                    params: { assignTo, day, duration: perPersonDailyDurations[day] },
-                };
-                await bigQueryClient.query(perPersonOptions);
+        // Get all tasks for the personResponsible for the relevant days to re-calculate total duration for those days
+        const getPersonTasksQuery = `
+            SELECT
+                t2.Responsibility,
+                t2.Day,
+                t2.Duration_In_Minutes
+            FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\` AS t2
+            JOIN \`${projectId}.${bigQueryDataset}.${bigQueryTable}\` AS t1
+            ON t1.Key = t2.Key
+            WHERE t1.Responsibility = @personResponsible
+            AND t2.Day IN UNNEST(@daysArray);
+        `;
+        const daysArray = Object.keys(hours); // Days affected by this update
+        const [personDailyDurations] = await bigQueryClient.query({
+            query: getPersonTasksQuery,
+            params: { personResponsible: personResponsible, daysArray: daysArray },
+        });
+
+        const summedDurations = {};
+        personDailyDurations.forEach(row => {
+            if (!summedDurations[row.Day]) {
+                summedDurations[row.Day] = 0;
             }
-            console.log('Per-person-per-day entries upserted successfully.');
-        }
+            summedDurations[row.Day] += row.Duration_In_Minutes;
+        });
 
+        for (const day in summedDurations) {
+            const totalDurationForDay = summedDurations[day];
+            const mergePerPersonQuery = `
+                MERGE \`${projectId}.${bigQueryDataset}.${bigQueryTable3}\` AS T
+                USING (SELECT
+                    @personResponsible AS Responsibility,
+                    @day AS Day,
+                    @totalDurationForDay AS Duration_In_Minutes
+                ) S
+                ON T.Responsibility = S.Responsibility AND T.Day = S.Day
+                WHEN MATCHED THEN
+                    UPDATE SET Duration_In_Minutes = S.Duration_In_Minutes
+                WHEN NOT MATCHED THEN
+                    INSERT (Responsibility, Day, Duration_In_Minutes)
+                    VALUES (S.Responsibility, S.Day, S.Duration_In_Minutes);
+            `;
+            const perPersonOptions = {
+                query: mergePerPersonQuery,
+                params: {
+                    personResponsible: personResponsible,
+                    day: day,
+                    totalDurationForDay: totalDurationForDay,
+                },
+            };
+            await bigQueryClient.query(perPersonOptions);
+        }
+        console.log('Per-person-per-day entries upserted successfully.');
 
         res.status(200).json({ message: 'Task and schedules updated successfully' });
 
@@ -351,12 +321,10 @@ app.put('/api/update-task-status', async (req, res) => {
     }
 });
 
-
 // Delete Task from BigQuery
 app.delete('/api/data/:deliveryCode', async (req, res) => {
     const { deliveryCode } = req.params;
-    console.log("Attempting to delete delivery with code:", deliveryCode);
-
+    console.log("hi", req.params)
     const query = `
         DELETE FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
         WHERE DelCode_w_o__ = @deliveryCode
@@ -378,7 +346,38 @@ app.delete('/api/data/:deliveryCode', async (req, res) => {
 });
 
 
-const PORT = process.env.PORT || 5000;
+// Endpoint to fetch data for Per_Key_Per_Day (bigQueryTable2)
+app.get('/api/per-key-per-day', async (req, res) => {
+    try {
+        const query = `
+            SELECT Key, Day, Duration_In_Minutes
+            FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\`;
+        `;
+        const [rows] = await bigQueryClient.query(query);
+        res.status(200).json(rows);
+    } catch (error) {
+        console.error('Error fetching per-key-per-day data from BigQuery:', error);
+        res.status(500).json({ error: 'Failed to fetch per-key-per-day data from BigQuery.' });
+    }
+});
+
+// Endpoint to fetch data for Per_Person_Per_Day (bigQueryTable3)
+app.get('/api/per-person-per-day', async (req, res) => {
+    try {
+        const query = `
+            SELECT Responsibility, Day, Duration_In_Minutes
+            FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable3}\`;
+        `;
+        const [rows] = await bigQueryClient.query(query);
+        res.status(200).json(rows);
+    } catch (error) {
+        console.error('Error fetching per-person-per-day data from BigQuery:', error);
+        res.status(500).json({ error: 'Failed to fetch per-person-per-day data from BigQuery.' });
+    }
+});
+
+
+const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
