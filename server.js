@@ -67,11 +67,11 @@ app.get('/api/data', async (req, res) => {
     try {
         const limit = parseInt(req.query.limit, 10) || 500;
         const offset = parseInt(req.query.offset, 10) || 0;
-        const rawEmailParam = req.query.email ? req.query.email.toLowerCase() : null; 
+        const rawEmailParam = req.query.email ? req.query.email.toLowerCase() : null;
         const requestedDelCode = req.query.delCode;
         const searchTerm = req.query.searchTerm ? req.query.searchTerm.toLowerCase() : ''; // Get search term
         const selectedClient = req.query.selectedClient ? req.query.selectedClient.toLowerCase() : ''; // Get selected client
-        
+
         const isAdminRequest = ADMIN_EMAILS_BACKEND.includes(rawEmailParam);
         console.log(`Backend /api/data: Request from ${rawEmailParam}, isAdminRequest: ${isAdminRequest}`);
         console.log(`Backend /api/data: Requested delCode: ${requestedDelCode}`);
