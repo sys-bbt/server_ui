@@ -69,8 +69,8 @@ app.get('/api/data', async (req, res) => {
         const offset = parseInt(req.query.offset, 10) || 0;
         const rawEmailParam = req.query.email ? req.query.email.toLowerCase() : null;
         const requestedDelCode = req.query.delCode;
-        const searchTerm = req.query.searchTerm ? req.query.searchTerm.toLowerCase() : ''; // Get search term
-        const selectedClient = req.query.selectedClient ? req.query.selectedClient.toLowerCase() : ''; // Get selected client
+        const searchTerm = req.query.searchTerm ? req.query.searchTerm.toLowerCase() : '';
+        const selectedClient = req.query.selectedClient ? req.query.selectedClient.toLowerCase() : '';
 
         const isAdminRequest = ADMIN_EMAILS_BACKEND.includes(rawEmailParam);
         console.log(`Backend /api/data: Request from ${rawEmailParam}, isAdminRequest: ${isAdminRequest}`);
@@ -83,17 +83,18 @@ app.get('/api/data', async (req, res) => {
         }
 
         let baseQuery = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\``;
-        let rows = [];
+        let whereClauses = [];
+        let params = {};
 
         if (requestedDelCode) { // Logic for DeliveryDetail page (specific delCode requested)
             let delCodeWhereClause = `WHERE DelCode_w_o__ = @requestedDelCode`;
-            let delCodeParams = { requestedDelCode: requestedDelCode };
+            params.requestedDelCode = requestedDelCode;
 
             if (isAdminRequest) {
                 // Admins see all tasks for the requested delCode
                 const options = {
                     query: `${baseQuery} ${delCodeWhereClause} ORDER BY Step_ID ASC;`,
-                    params: delCodeParams,
+                    params: params,
                 };
                 [rows] = await bigQueryClient.query(options);
                 console.log(`Backend /api/data (Detail View - Admin): Fetched ${rows.length} rows for delCode ${requestedDelCode}.`);
@@ -103,7 +104,7 @@ app.get('/api/data', async (req, res) => {
                 const queryStep0 = `${baseQuery} WHERE DelCode_w_o__ = @requestedDelCode AND Step_ID = 0;`;
                 const optionsStep0 = {
                     query: queryStep0,
-                    params: delCodeParams,
+                    params: params,
                 };
                 const [rowsStep0] = await bigQueryClient.query(optionsStep0);
                 console.log(`Backend /api/data (Detail View - Non-Admin): Fetched ${rowsStep0.length} Step_ID=0 row(s) for delCode ${requestedDelCode}.`);
@@ -111,7 +112,7 @@ app.get('/api/data', async (req, res) => {
                 // Query 2: Get all tasks (Step_ID != 0) for this delCode assigned to the user
                 const emailsToSearch = rawEmailParam.split(',').map(email => email.trim().toLowerCase()).filter(email => email !== ''); // Already lowercase
                 let queryTasks = '';
-                let paramsTasks = { requestedDelCode: requestedDelCode };
+                let paramsTasks = { requestedDelCode: requestedDelCode }; // Re-use requestedDelCode param
 
                 if (emailsToSearch.length > 0) {
                     const emailConditions = emailsToSearch.map((email, index) => {
@@ -137,39 +138,49 @@ app.get('/api/data', async (req, res) => {
                 }
             }
         } else { // Logic for DeliveryList page (general list view)
-            let whereClauses = [];
-            let params = {};
+            if (isAdminRequest) {
+                baseQuery = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\` WHERE Step_ID = 0`;
+            } else {
+                const emailsToSearch = rawEmailParam.split(',').map(email => email.trim().toLowerCase()).filter(email => email !== '');
+
+                if (emailsToSearch.length === 0) {
+                    // If no valid emails for non-admin, return empty
+                    return res.status(200).json([]);
+                }
+
+                const emailSubqueryConditions = emailsToSearch.map((email, index) => {
+                    params[`subquery_email_${index}`] = email;
+                    return `REGEXP_CONTAINS(LOWER(t2.Emails), CONCAT('(^|[[:space:],])', @subquery_email_${index}, '([[:space:],]|$)'))`;
+                }).join(' OR ');
+
+                baseQuery = `
+                    SELECT t1.*
+                    FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\` t1
+                    WHERE t1.Step_ID = 0
+                      AND t1.DelCode_w_o__ IN (
+                        SELECT DISTINCT t2.DelCode_w_o__
+                        FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\` t2
+                        WHERE t2.Step_ID != 0
+                          AND (${emailSubqueryConditions})
+                      )
+                `;
+            }
 
             // Add client filter if selected
             if (selectedClient) {
-                whereClauses.push(`LOWER(Client) = @selectedClient`);
+                whereClauses.push(`LOWER(t1.Client) = @selectedClient`); // Use t1. for alias
                 params.selectedClient = selectedClient;
             }
 
             // Add search term filter if provided
             if (searchTerm) {
-                const searchCondition = `(LOWER(Delivery_code) LIKE @searchTerm OR LOWER(Short_Description) LIKE @searchTerm OR LOWER(Client) LIKE @searchTerm)`;
+                const searchCondition = `(LOWER(t1.Delivery_code) LIKE @searchTerm OR LOWER(t1.Short_Description) LIKE @searchTerm OR LOWER(t1.Client) LIKE @searchTerm)`; // Use t1. for alias
                 whereClauses.push(searchCondition);
                 params.searchTerm = `%${searchTerm}%`;
             }
 
-            // If not an admin, filter by email
-            if (!isAdminRequest) {
-                const emailsToSearch = rawEmailParam.split(',').map(email => email.trim().toLowerCase()).filter(email => email !== '');
-                if (emailsToSearch.length > 0) {
-                    const emailConditions = emailsToSearch.map((email, index) => {
-                        params[`email_${index}`] = email;
-                        return `REGEXP_CONTAINS(LOWER(Emails), CONCAT('(^|[[:space:],])', @email_${index}, '([[:space:],]|$)'))`;
-                    }).join(' OR ');
-                    whereClauses.push(`(${emailConditions})`);
-                } else {
-                    // If no email for non-admin, return empty
-                    return res.status(200).json([]);
-                }
-            }
-
-            const whereClause = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
-            const query = `${baseQuery} ${whereClause} ORDER BY Created_at DESC LIMIT @limit OFFSET @offset;`;
+            const finalWhereClause = whereClauses.length > 0 ? ` AND ${whereClauses.join(' AND ')}` : '';
+            const query = `${baseQuery} ${finalWhereClause} ORDER BY t1.Created_at DESC LIMIT @limit OFFSET @offset;`;
             params.limit = limit;
             params.offset = offset;
 
