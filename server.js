@@ -146,13 +146,27 @@ app.get('/api/data', async (req, res) => {
 
                 if (emailsToSearch.length === 0) {
                     // If no valid emails for non-admin, return empty
-                    return res.status(200).json([]);
+                    // This might need adjustment if a system user with no assigned emails
+                    // should still see all "system" assigned workflows.
+                    // For now, it returns empty if no emails are present.
+                    // We'll rely on the systemResponsibility logic for system views.
+                    // return res.status(200).json([]); // Commenting this out for now
                 }
 
                 const emailSubqueryConditions = emailsToSearch.map((email, index) => {
                     params[`subquery_email_${index}`] = email;
                     return `REGEXP_CONTAINS(LOWER(t2.Emails), CONCAT('(^|[[:space:],])', @subquery_email_${index}, '([[:space:],]|$)'))`;
                 }).join(' OR ');
+
+                // --- START NEW LOGIC FOR SYSTEM RESPONSIBILITY ---
+                const systemResponsibilityValue = 'system'; // Assuming 'system' is the value in Responsibility for system tasks
+                params.systemResponsibilityValue = systemResponsibilityValue; // Add param for system responsibility
+
+                let combinedSubqueryConditions = `LOWER(t2.Responsibility) = @systemResponsibilityValue`; // Always include system tasks
+                if (emailSubqueryConditions) { // If there are actual user emails to search for, combine with OR
+                    combinedSubqueryConditions = `(${emailSubqueryConditions}) OR ${combinedSubqueryConditions}`;
+                }
+                // --- END NEW LOGIC FOR SYSTEM RESPONSIBILITY ---
 
                 baseQuery = `
                     SELECT t1.*
@@ -162,7 +176,7 @@ app.get('/api/data', async (req, res) => {
                         SELECT DISTINCT t2.DelCode_w_o__
                         FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\` t2
                         WHERE t2.Step_ID != 0
-                          AND (${emailSubqueryConditions})
+                          AND (${combinedSubqueryConditions})
                       )
                 `;
             }
@@ -191,9 +205,9 @@ app.get('/api/data', async (req, res) => {
             };
             [rows] = await bigQueryClient.query(options);
 
-            // *** ADDED CONSOLE LOG HERE ***
+            // *** CONSOLE LOG REMAINS HERE FOR FURTHER DEBUGGING IF NEEDED ***
             console.log("Backend: Data for frontend (first 5 rows):", rows.slice(0, 5));
-            // *****************************
+            // ***************************************************************
 
             console.log(`Backend /api/data (List View): Fetched ${rows.length} rows.`);
         }
