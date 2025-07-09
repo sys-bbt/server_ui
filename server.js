@@ -770,23 +770,3 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
-```
-
-**Summary of Changes in `server.js`:**
-
-1.  **CORS Configuration:** Confirmed it's at the top and includes your Vercel URL. Added more `console.log` statements to help debug CORS in the future.
-2.  **`app.post('/api/post', ...)` route:**
-    * **Crucial Fix for `Key` Type:** Changed all instances of `Key: Number(Key)` to `Key: Key` and all `Key: 'INT64'` to `Key: 'STRING'` in `params` and `types` objects for all BigQuery queries (`checkMainTaskQuery`, `updateMainTaskQuery`, `insertMainTaskQuery`, `selectQuery`, `UPDATE` slider query, `INSERT` slider query). This is because your `Key` values (e.g., `VED/PPC/SCNW/JUN16/6246`) are strings, not numbers, and your BigQuery schema for `Key` in `Per_Key_Per_Day` is `STRING`. This should resolve the "Syntax error: Expected "(" but got "/"" issue.
-    * **`Duration_Unit` added:** Added `Duration_Unit = @Duration_Unit` to the `SET` clause of the `UPDATE` query and to the column list and `VALUES` clause of the `INSERT` query for `bigQueryTable2`. Also added `Duration_Unit: slider.Duration_Uint || null` to the `params` and `Duration_Unit: 'STRING'` to the `types` for both.
-    * **`Responsibility` corrected:** Changed `personResponsible: slider.personResponsible || null` to `Responsibility: slider.Responsibility || null` in the `params` for both `UPDATE` and `INSERT` queries for `bigQueryTable2`. This correctly maps the `Responsibility` field sent from your frontend's `slidersData`.
-    * **Execution of Slider Queries:** Explicitly added a `for...of` loop to `await bigQueryClient.query(queryConfig)` for each `sliderQueriesToExecute`. `Promise.all` only *prepares* the promises; they still need to be executed.
-
-**Next Steps for You:**
-
-1.  **Replace your `server.js` file** with the complete code provided above.
-2.  **Commit your changes** to your Git repository.
-3.  **Go to your Render Dashboard** for your backend service.
-4.  Initiate a **"Manual Deploy"** and select **"Clear build cache & deploy"**. This is essential to ensure Render pulls the absolute latest version of your code and doesn't use any cached build artifacts.
-5.  **Monitor the Render logs** during and after deployment. Look for any errors during startup or when you make requests from your frontend.
-
-This comprehensive update should address all the BigQuery insertion issues and the CORS probl
