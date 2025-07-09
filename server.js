@@ -144,10 +144,10 @@ app.get('/api/data', async (req, res) => {
         query += ' WHERE ' + conditions.join(' AND ');
     }
 
-    // Ensure this 'initiated' is the correct column name from your BigQuery table.
+    // Ensure this 'Initiated_Timestamp' is the correct column name from your BigQuery table.
     // If your column is named differently (e.g., 'start_date', 'timestamp_created'),
-    // replace 'initiated' with the correct name.
-    query += ` ORDER BY initiated DESC LIMIT @limit OFFSET @offset`;
+    // replace 'Initiated_Timestamp' with the correct name.
+    query += ` ORDER BY Initiated_Timestamp DESC LIMIT @limit OFFSET @offset`;
     params.limit = parseInt(limit);
     params.offset = offset;
 
