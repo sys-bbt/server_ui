@@ -113,7 +113,7 @@ app.get('/api/people-mapping', async (req, res) => {
 
 // Fetch all deliveries or filter by client/search term with pagination
 app.get('/api/data', async (req, res) => {
-    const { page = 0, limit = 10, client, search } = req.query; // Default page 0, limit 10
+    const { page = 0, limit = 10, client, search, email } = req.query; // <--- ADD 'email' here
 
     const offset = parseInt(page) * parseInt(limit);
 
@@ -127,25 +127,34 @@ app.get('/api/data', async (req, res) => {
     }
 
     if (search) {
-        // Example: Search across multiple text fields for the search term
         conditions.push(
             `(LOWER(Task_Details) LIKE LOWER(@search) OR LOWER(DelCode_w_o__) LIKE LOWER(@search))`
         );
         params.search = `%${search}%`;
     }
 
+    // >>>>>>>>>>>>>> ADD THIS BLOCK FOR EMAIL FILTERING <<<<<<<<<<<<<<<<
+    if (email) { // Check if 'email' query parameter exists
+        conditions.push('Responsibility = @email'); // Assuming 'Responsibility' column stores the email
+        params.email = email;
+    }
+    // >>>>>>>>>>>>>> END OF ADDITION <<<<<<<<<<<<<<<<
+
     if (conditions.length > 0) {
         query += ' WHERE ' + conditions.join(' AND ');
     }
 
-    query += ` ORDER BY Initiated_Timestamp DESC LIMIT @limit OFFSET @offset`; // Order by initiated date descending
+    // Ensure this 'initiated' is the correct column name from your BigQuery table.
+    // If your column is named differently (e.g., 'start_date', 'timestamp_created'),
+    // replace 'initiated' with the correct name.
+    query += ` ORDER BY initiated DESC LIMIT @limit OFFSET @offset`;
     params.limit = parseInt(limit);
     params.offset = offset;
 
     const options = {
         query: query,
         params: params,
-        location: 'US', // Specify your dataset location if not default
+        location: 'US',
     };
 
     try {
