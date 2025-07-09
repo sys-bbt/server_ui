@@ -167,6 +167,46 @@ app.get('/api/data', async (req, res) => {
     }
 });
 
+// New endpoint to fetch delivery/task details by DelCode
+// Add this new endpoint to your server.js around Line 134 (after the previous app.get('/api/data') block)
+app.get('/api/delivery/:delCode', async (req, res) => {
+    const { delCode } = req.params;
+    console.log(`Server: Received request for delivery details for delCode: ${delCode}`);
+
+    if (!bigQueryClient) {
+        return res.status(500).json({ error: 'BigQuery client not initialized.' });
+    }
+
+    if (!delCode) {
+        return res.status(400).json({ error: 'Delivery Code is required.' });
+    }
+
+    const query = `
+        SELECT Key, Delivery_code, DelCode_w_o__, Step_ID, Task_Details, Frequency___Timeline, Client, Short_Description, Planned_Start_Timestamp, Planned_Delivery_Timestamp, Responsibility, Current_Status, Email, Emails, Total_Tasks, Completed_Tasks, Planned_Tasks, Percent_Tasks_Completed, Created_at, Updated_at, Time_Left_For_Next_Task_dd_hh_mm_ss, Card_Corner_Status
+        FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
+        WHERE DelCode_w_o__ = @delCode
+    `;
+    const options = {
+        query: query,
+        params: { delCode },
+    };
+
+    try {
+        const [job] = await bigQueryClient.createQueryJob(options);
+        const [rows] = await job.getQueryResults();
+
+        if (rows.length === 0) {
+            return res.status(404).json({ message: 'Delivery not found.' });
+        }
+
+        res.status(200).json(rows); // Return all tasks associated with the delivery code
+    } catch (error) {
+        console.error('Error fetching delivery details from BigQuery:', error);
+        res.status(500).json({ error: 'Failed to fetch delivery details from BigQuery.' });
+    }
+});
+
+
 // Endpoint to fetch tasks by Key for per-key-per-day data
 app.get('/api/per-key-per-day', async (req, res) => {
     const { key } = req.query; // Expecting 'key' as a query parameter
