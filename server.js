@@ -67,7 +67,7 @@ app.get('/api/data', async (req, res) => {
     let rows; // Declare rows here so it's accessible outside the if/else
     try {
         const limit = parseInt(req.query.limit, 10) || 500;
-        const offset = parseInt(req.query.offset, 10) || 0;
+        const offset = parseInt(req.query.offset, 10) || 0; // Keep this for admin/detail view
         const rawEmailParam = req.query.email ? req.query.email.toLowerCase() : null;
         const requestedDelCode = req.query.delCode;
         const searchTerm = req.query.searchTerm ? req.query.searchTerm.toLowerCase() : '';
@@ -88,7 +88,6 @@ app.get('/api/data', async (req, res) => {
         let params = {};
 
         // Define system responsibility value once
-        // IMPORTANT: Confirm 'system' is the exact value in your BigQuery Responsibility column for system tasks.
         const systemResponsibilityValue = 'system'; 
         params.systemResponsibilityValue = systemResponsibilityValue; 
 
@@ -102,7 +101,6 @@ app.get('/api/data', async (req, res) => {
                     query: `${baseQuery} ${delCodeWhereClause} ORDER BY Step_ID ASC;`,
                     params: params,
                 };
-                // Debug log for admin detail view
                 console.log("Backend: DETAIL VIEW (Admin) Query being sent to BigQuery:", options.query);
                 console.log("Backend: DETAIL VIEW (Admin) Query Parameters:", options.params);
 
@@ -116,7 +114,6 @@ app.get('/api/data', async (req, res) => {
                     query: queryStep0,
                     params: params,
                 };
-                // Debug log for Step_ID=0 detail view
                 console.log("Backend: DETAIL VIEW (Non-Admin Step_ID=0) Query being sent to BigQuery:", optionsStep0.query);
                 console.log("Backend: DETAIL VIEW (Non-Admin Step_ID=0) Query Parameters:", optionsStep0.params);
 
@@ -136,7 +133,6 @@ app.get('/api/data', async (req, res) => {
                     }).join(' OR ');
                 }
 
-                // Combine email conditions with system responsibility condition for DETAIL VIEW
                 let combinedTaskConditions = `LOWER(Responsibility) = @systemResponsibilityValue`; 
                 if (emailConditions) { 
                     combinedTaskConditions = `(${emailConditions}) OR ${combinedTaskConditions}`;
@@ -147,7 +143,6 @@ app.get('/api/data', async (req, res) => {
                     query: queryTasks,
                     params: paramsTasks,
                 };
-                // Debug log for detail view tasks
                 console.log("Backend: DETAIL VIEW (Non-Admin Tasks) Query being sent to BigQuery:", optionsTasks.query);
                 console.log("Backend: DETAIL VIEW (Non-Admin Tasks) Query Parameters:", optionsTasks.params);
 
@@ -159,6 +154,8 @@ app.get('/api/data', async (req, res) => {
         } else { // Logic for DeliveryList page (general list view)
             if (isAdminRequest) {
                 baseQuery = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\` WHERE Step_ID = 0`;
+                params.limit = limit;
+                params.offset = offset; // Admin list view respects original offset
             } else {
                 // --- LIST VIEW LOGIC WITH EMAIL AND SYSTEM RESPONSIBILITY ---
                 const emailsToSearch = rawEmailParam.split(',').map(email => email.trim().toLowerCase()).filter(email => email !== '');
@@ -171,7 +168,6 @@ app.get('/api/data', async (req, res) => {
                     }).join(' OR ');
                 }
 
-                // Combine email subquery conditions with system responsibility for LIST VIEW
                 let combinedSubqueryConditions = `LOWER(t2.Responsibility) = @systemResponsibilityValue`; 
                 if (emailSubqueryConditions) { 
                     combinedSubqueryConditions = `(${emailSubqueryConditions}) OR ${combinedSubqueryConditions}`;
@@ -189,6 +185,11 @@ app.get('/api/data', async (req, res) => {
                       )
                 `;
                 // --- END LIST VIEW LOGIC ---
+
+                // --- TEMPORARY DEBUG CHANGE: FORCE OFFSET TO 0 FOR NON-ADMIN LIST VIEW ---
+                params.limit = limit;
+                params.offset = 0; // Temporarily force offset to 0 for debugging
+                // --- END TEMPORARY DEBUG CHANGE ---
             }
 
             // Add client filter if selected
@@ -206,20 +207,18 @@ app.get('/api/data', async (req, res) => {
 
             const finalWhereClause = whereClauses.length > 0 ? ` AND ${whereClauses.join(' AND ')}` : '';
             const query = `${baseQuery} ${finalWhereClause} ORDER BY t1.Created_at DESC LIMIT @limit OFFSET @offset;`;
-            params.limit = limit;
-            params.offset = offset; 
+            
 
             const options = {
                 query: query,
                 params: params,
             };
-            // Debug log for list view query
-            console.log("Backend: LIST VIEW Query being sent to BigQuery:", options.query);
-            console.log("Backend: LIST VIEW Query Parameters:", options.params);
+            console.log("Backend: LIST VIEW Query being sent to BigQuery (DEBUG OFFSET):", options.query);
+            console.log("Backend: LIST VIEW Query Parameters (DEBUG OFFSET):", options.params);
 
             [rows] = await bigQueryClient.query(options);
-            console.log("Backend: LIST VIEW - Data for frontend (first 5 rows):", rows.slice(0, 5));
-            console.log(`Backend /api/data (List View): Fetched ${rows.length} rows.`);
+            console.log("Backend: LIST VIEW - Data for frontend (first 5 rows - DEBUG OFFSET):", rows.slice(0, 5));
+            console.log(`Backend /api/data (List View - DEBUG OFFSET): Fetched ${rows.length} rows.`);
         }
         res.json(rows);
     } catch (error) {
