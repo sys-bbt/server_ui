@@ -87,6 +87,10 @@ app.get('/api/data', async (req, res) => {
         let whereClauses = [];
         let params = {};
 
+        // Define system responsibility value once
+        const systemResponsibilityValue = 'system'; // Assuming 'system' is the value in Responsibility for system tasks
+        params.systemResponsibilityValue = systemResponsibilityValue; // Add param for system responsibility
+
         if (requestedDelCode) { // Logic for DeliveryDetail page (specific delCode requested)
             let delCodeWhereClause = `WHERE DelCode_w_o__ = @requestedDelCode`;
             params.requestedDelCode = requestedDelCode;
@@ -110,74 +114,99 @@ app.get('/api/data', async (req, res) => {
                 const [rowsStep0] = await bigQueryClient.query(optionsStep0);
                 console.log(`Backend /api/data (Detail View - Non-Admin): Fetched ${rowsStep0.length} Step_ID=0 row(s) for delCode ${requestedDelCode}.`);
 
-                // Query 2: Get all tasks (Step_ID != 0) for this delCode assigned to the user
+                // Query 2: Get all tasks (Step_ID != 0) for this delCode assigned to the user OR system
                 const emailsToSearch = rawEmailParam.split(',').map(email => email.trim().toLowerCase()).filter(email => email !== ''); // Already lowercase
                 let queryTasks = '';
-                let paramsTasks = { requestedDelCode: requestedDelCode }; // Re-use requestedDelCode param
+                let paramsTasks = { requestedDelCode: requestedDelCode, systemResponsibilityValue: systemResponsibilityValue }; // Re-use requestedDelCode and add system param
 
+                let emailConditions = '';
                 if (emailsToSearch.length > 0) {
-                    const emailConditions = emailsToSearch.map((email, index) => {
+                    emailConditions = emailsToSearch.map((email, index) => {
                         paramsTasks[`email_${index}`] = email;
-                        // Changed regex to be more robust for separators (commas, spaces, or start/end of string)
                         return `REGEXP_CONTAINS(LOWER(Emails), CONCAT('(^|[[:space:],])', @email_${index}, '([[:space:],]|$)'))`;
                     }).join(' OR ');
-
-                    queryTasks = `${baseQuery} WHERE DelCode_w_o__ = @requestedDelCode AND Step_ID != 0 AND (${emailConditions});`;
-                    const optionsTasks = {
-                        query: queryTasks,
-                        params: paramsTasks,
-                    };
-                    const [rowsTasks] = await bigQueryClient.query(optionsTasks);
-                    console.log(`Backend /api/data (Detail View - Non-Admin): Fetched ${rowsTasks.length} assigned task row(s) for delCode ${requestedDelCode}.`);
-
-                    // Combine Step_ID=0 row(s) with assigned tasks, ensuring no duplicates if Step_ID=0 is also assigned
-                    rows = [...rowsStep0, ...rowsTasks.filter(task => !rowsStep0.some(s0 => s0.Key === task.Key))];
-                } else {
-                    // If no valid emails for non-admin, only return Step_ID = 0 tasks
-                    rows = rowsStep0;
-                    console.log(`Backend /api/data (Detail View - Non-Admin): No valid emails, returning only Step_ID=0 for delCode ${requestedDelCode}.`);
                 }
+
+                // Combine email conditions with system responsibility condition for DETAIL VIEW
+                let combinedTaskConditions = `LOWER(Responsibility) = @systemResponsibilityValue`; // Always include system tasks
+                if (emailConditions) { // If there are actual user emails to search for, combine with OR
+                    combinedTaskConditions = `(${emailConditions}) OR ${combinedTaskConditions}`;
+                }
+
+                queryTasks = `${baseQuery} WHERE DelCode_w_o__ = @requestedDelCode AND Step_ID != 0 AND (${combinedTaskConditions});`;
+                const optionsTasks = {
+                    query: queryTasks,
+                    params: paramsTasks,
+                };
+                const [rowsTasks] = await bigQueryClient.query(optionsTasks);
+                console.log(`Backend /api/data (Detail View - Non-Admin): Fetched ${rowsTasks.length} assigned task row(s) for delCode ${requestedDelCode}.`);
+
+                // Combine Step_ID=0 row(s) with assigned tasks, ensuring no duplicates if Step_ID=0 is also assigned
+                rows = [...rowsStep0, ...rowsTasks.filter(task => !rowsStep0.some(s0 => s0.Key === task.Key))];
             }
         } else { // Logic for DeliveryList page (general list view)
             if (isAdminRequest) {
                 baseQuery = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\` WHERE Step_ID = 0`;
             } else {
-                // --- START TEMPORARY DEBUGGING QUERY FOR NON-ADMIN LIST VIEW ---
-                // This query is intentionally simplified to check if any Step_ID = 0 rows are returned at all.
-                // It temporarily bypasses user email, system responsibility, search, and client filters.
-                
+                // --- REVERTED AND UPDATED LIST VIEW LOGIC ---
+                const emailsToSearch = rawEmailParam.split(',').map(email => email.trim().toLowerCase()).filter(email => email !== '');
+
+                let emailSubqueryConditions = '';
+                if (emailsToSearch.length > 0) {
+                    emailSubqueryConditions = emailsToSearch.map((email, index) => {
+                        params[`subquery_email_${index}`] = email;
+                        return `REGEXP_CONTAINS(LOWER(t2.Emails), CONCAT('(^|[[:space:],])', @subquery_email_${index}, '([[:space:],]|$)'))`;
+                    }).join(' OR ');
+                }
+
+                // Combine email subquery conditions with system responsibility for LIST VIEW
+                let combinedSubqueryConditions = `LOWER(t2.Responsibility) = @systemResponsibilityValue`; // Always include system tasks
+                if (emailSubqueryConditions) { // If there are actual emails to search for, combine with OR
+                    combinedSubqueryConditions = `(${emailSubqueryConditions}) OR ${combinedSubqueryConditions}`;
+                }
+
                 baseQuery = `
                     SELECT t1.*
                     FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\` t1
                     WHERE t1.Step_ID = 0
+                      AND t1.DelCode_w_o__ IN (
+                        SELECT DISTINCT t2.DelCode_w_o__
+                        FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\` t2
+                        WHERE t2.Step_ID != 0
+                          AND (${combinedSubqueryConditions})
+                      )
                 `;
-                
-                // Clear any existing whereClauses and reset params to ensure no other filters are applied
-                whereClauses = []; 
-                params = {
-                    limit: limit, // Still respects frontend limit/offset
-                    offset: offset
-                }; 
-
-                // The finalWhereClause will now always be an empty string because whereClauses is reset
-                const finalWhereClause = whereClauses.length > 0 ? ` AND ${whereClauses.join(' AND ')}` : ''; 
-                const query = `${baseQuery} ${finalWhereClause} ORDER BY t1.Created_at DESC LIMIT @limit OFFSET @offset;`;
-
-                const options = {
-                    query: query,
-                    params: params,
-                };
-                [rows] = await bigQueryClient.query(options);
-
-                // *** IMPORTANT: CHECK THIS LOG IN YOUR SERVER'S TERMINAL ***
-                console.log("Backend: DEBUG QUERY - Data for frontend (first 5 rows):", rows.slice(0, 5));
-                // **********************************************************
-
-                console.log(`Backend /api/data (DEBUG QUERY - List View): Fetched ${rows.length} rows.`);
-
-                // --- END TEMPORARY DEBUGGING QUERY FOR NON-ADMIN LIST VIEW ---
-
+                // --- END REVERTED AND UPDATED LIST VIEW LOGIC ---
             }
+
+            // Add client filter if selected
+            if (selectedClient) {
+                whereClauses.push(`LOWER(t1.Client) = @selectedClient`); // Use t1. for alias
+                params.selectedClient = selectedClient;
+            }
+
+            // Add search term filter if provided
+            if (searchTerm) {
+                const searchCondition = `(LOWER(t1.Delivery_code) LIKE @searchTerm OR LOWER(t1.Short_Description) LIKE @searchTerm OR LOWER(t1.Client) LIKE @searchTerm)`; // Use t1. for alias
+                whereClauses.push(searchCondition);
+                params.searchTerm = `%${searchTerm}%`;
+            }
+
+            const finalWhereClause = whereClauses.length > 0 ? ` AND ${whereClauses.join(' AND ')}` : '';
+            const query = `${baseQuery} ${finalWhereClause} ORDER BY t1.Created_at DESC LIMIT @limit OFFSET @offset;`;
+            params.limit = limit;
+            params.offset = offset; // Ensure limit/offset are correctly passed to params
+
+            const options = {
+                query: query,
+                params: params,
+            };
+            [rows] = await bigQueryClient.query(options);
+
+            // You can remove or comment out this debug log after confirming it works
+            console.log("Backend: LIST VIEW - Data for frontend (first 5 rows):", rows.slice(0, 5));
+
+            console.log(`Backend /api/data (List View): Fetched ${rows.length} rows.`);
         }
         res.json(rows);
     } catch (error) {
