@@ -135,7 +135,7 @@ app.get('/api/data', async (req, res) => {
 
     // >>>>>>>>>>>>>> ADD THIS BLOCK FOR EMAIL FILTERING <<<<<<<<<<<<<<<<
     if (email) { // Check if 'email' query parameter exists
-        conditions.push('Responsibility = @email'); // Assuming 'Responsibility' column stores the email
+        conditions.push('Emails = @email'); // Assuming 'Emails' column stores the email
         params.email = email;
     }
     // >>>>>>>>>>>>>> END OF ADDITION <<<<<<<<<<<<<<<<
