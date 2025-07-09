@@ -88,8 +88,9 @@ app.get('/api/data', async (req, res) => {
         let params = {};
 
         // Define system responsibility value once
-        const systemResponsibilityValue = 'system'; // Assuming 'system' is the value in Responsibility for system tasks
-        params.systemResponsibilityValue = systemResponsibilityValue; // Add param for system responsibility
+        // IMPORTANT: Confirm 'system' is the exact value in your BigQuery Responsibility column for system tasks.
+        const systemResponsibilityValue = 'system'; 
+        params.systemResponsibilityValue = systemResponsibilityValue; 
 
         if (requestedDelCode) { // Logic for DeliveryDetail page (specific delCode requested)
             let delCodeWhereClause = `WHERE DelCode_w_o__ = @requestedDelCode`;
@@ -101,6 +102,10 @@ app.get('/api/data', async (req, res) => {
                     query: `${baseQuery} ${delCodeWhereClause} ORDER BY Step_ID ASC;`,
                     params: params,
                 };
+                // Debug log for admin detail view
+                console.log("Backend: DETAIL VIEW (Admin) Query being sent to BigQuery:", options.query);
+                console.log("Backend: DETAIL VIEW (Admin) Query Parameters:", options.params);
+
                 [rows] = await bigQueryClient.query(options);
                 console.log(`Backend /api/data (Detail View - Admin): Fetched ${rows.length} rows for delCode ${requestedDelCode}.`);
             } else {
@@ -111,13 +116,17 @@ app.get('/api/data', async (req, res) => {
                     query: queryStep0,
                     params: params,
                 };
+                // Debug log for Step_ID=0 detail view
+                console.log("Backend: DETAIL VIEW (Non-Admin Step_ID=0) Query being sent to BigQuery:", optionsStep0.query);
+                console.log("Backend: DETAIL VIEW (Non-Admin Step_ID=0) Query Parameters:", optionsStep0.params);
+
                 const [rowsStep0] = await bigQueryClient.query(optionsStep0);
                 console.log(`Backend /api/data (Detail View - Non-Admin): Fetched ${rowsStep0.length} Step_ID=0 row(s) for delCode ${requestedDelCode}.`);
 
                 // Query 2: Get all tasks (Step_ID != 0) for this delCode assigned to the user OR system
-                const emailsToSearch = rawEmailParam.split(',').map(email => email.trim().toLowerCase()).filter(email => email !== ''); // Already lowercase
+                const emailsToSearch = rawEmailParam.split(',').map(email => email.trim().toLowerCase()).filter(email => email !== ''); 
                 let queryTasks = '';
-                let paramsTasks = { requestedDelCode: requestedDelCode, systemResponsibilityValue: systemResponsibilityValue }; // Re-use requestedDelCode and add system param
+                let paramsTasks = { requestedDelCode: requestedDelCode, systemResponsibilityValue: systemResponsibilityValue }; 
 
                 let emailConditions = '';
                 if (emailsToSearch.length > 0) {
@@ -128,8 +137,8 @@ app.get('/api/data', async (req, res) => {
                 }
 
                 // Combine email conditions with system responsibility condition for DETAIL VIEW
-                let combinedTaskConditions = `LOWER(Responsibility) = @systemResponsibilityValue`; // Always include system tasks
-                if (emailConditions) { // If there are actual user emails to search for, combine with OR
+                let combinedTaskConditions = `LOWER(Responsibility) = @systemResponsibilityValue`; 
+                if (emailConditions) { 
                     combinedTaskConditions = `(${emailConditions}) OR ${combinedTaskConditions}`;
                 }
 
@@ -138,17 +147,20 @@ app.get('/api/data', async (req, res) => {
                     query: queryTasks,
                     params: paramsTasks,
                 };
+                // Debug log for detail view tasks
+                console.log("Backend: DETAIL VIEW (Non-Admin Tasks) Query being sent to BigQuery:", optionsTasks.query);
+                console.log("Backend: DETAIL VIEW (Non-Admin Tasks) Query Parameters:", optionsTasks.params);
+
                 const [rowsTasks] = await bigQueryClient.query(optionsTasks);
                 console.log(`Backend /api/data (Detail View - Non-Admin): Fetched ${rowsTasks.length} assigned task row(s) for delCode ${requestedDelCode}.`);
 
-                // Combine Step_ID=0 row(s) with assigned tasks, ensuring no duplicates if Step_ID=0 is also assigned
                 rows = [...rowsStep0, ...rowsTasks.filter(task => !rowsStep0.some(s0 => s0.Key === task.Key))];
             }
         } else { // Logic for DeliveryList page (general list view)
             if (isAdminRequest) {
                 baseQuery = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\` WHERE Step_ID = 0`;
             } else {
-                // --- REVERTED AND UPDATED LIST VIEW LOGIC ---
+                // --- LIST VIEW LOGIC WITH EMAIL AND SYSTEM RESPONSIBILITY ---
                 const emailsToSearch = rawEmailParam.split(',').map(email => email.trim().toLowerCase()).filter(email => email !== '');
 
                 let emailSubqueryConditions = '';
@@ -160,8 +172,8 @@ app.get('/api/data', async (req, res) => {
                 }
 
                 // Combine email subquery conditions with system responsibility for LIST VIEW
-                let combinedSubqueryConditions = `LOWER(t2.Responsibility) = @systemResponsibilityValue`; // Always include system tasks
-                if (emailSubqueryConditions) { // If there are actual emails to search for, combine with OR
+                let combinedSubqueryConditions = `LOWER(t2.Responsibility) = @systemResponsibilityValue`; 
+                if (emailSubqueryConditions) { 
                     combinedSubqueryConditions = `(${emailSubqueryConditions}) OR ${combinedSubqueryConditions}`;
                 }
 
@@ -176,18 +188,18 @@ app.get('/api/data', async (req, res) => {
                           AND (${combinedSubqueryConditions})
                       )
                 `;
-                // --- END REVERTED AND UPDATED LIST VIEW LOGIC ---
+                // --- END LIST VIEW LOGIC ---
             }
 
             // Add client filter if selected
             if (selectedClient) {
-                whereClauses.push(`LOWER(t1.Client) = @selectedClient`); // Use t1. for alias
+                whereClauses.push(`LOWER(t1.Client) = @selectedClient`); 
                 params.selectedClient = selectedClient;
             }
 
             // Add search term filter if provided
             if (searchTerm) {
-                const searchCondition = `(LOWER(t1.Delivery_code) LIKE @searchTerm OR LOWER(t1.Short_Description) LIKE @searchTerm OR LOWER(t1.Client) LIKE @searchTerm)`; // Use t1. for alias
+                const searchCondition = `(LOWER(t1.Delivery_code) LIKE @searchTerm OR LOWER(t1.Short_Description) LIKE @searchTerm OR LOWER(t1.Client) LIKE @searchTerm)`; 
                 whereClauses.push(searchCondition);
                 params.searchTerm = `%${searchTerm}%`;
             }
@@ -195,17 +207,18 @@ app.get('/api/data', async (req, res) => {
             const finalWhereClause = whereClauses.length > 0 ? ` AND ${whereClauses.join(' AND ')}` : '';
             const query = `${baseQuery} ${finalWhereClause} ORDER BY t1.Created_at DESC LIMIT @limit OFFSET @offset;`;
             params.limit = limit;
-            params.offset = offset; // Ensure limit/offset are correctly passed to params
+            params.offset = offset; 
 
             const options = {
                 query: query,
                 params: params,
             };
+            // Debug log for list view query
+            console.log("Backend: LIST VIEW Query being sent to BigQuery:", options.query);
+            console.log("Backend: LIST VIEW Query Parameters:", options.params);
+
             [rows] = await bigQueryClient.query(options);
-
-            // You can remove or comment out this debug log after confirming it works
             console.log("Backend: LIST VIEW - Data for frontend (first 5 rows):", rows.slice(0, 5));
-
             console.log(`Backend /api/data (List View): Fetched ${rows.length} rows.`);
         }
         res.json(rows);
