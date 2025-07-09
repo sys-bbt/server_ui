@@ -142,74 +142,42 @@ app.get('/api/data', async (req, res) => {
             if (isAdminRequest) {
                 baseQuery = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\` WHERE Step_ID = 0`;
             } else {
-                const emailsToSearch = rawEmailParam.split(',').map(email => email.trim().toLowerCase()).filter(email => email !== '');
-
-                if (emailsToSearch.length === 0) {
-                    // If no valid emails for non-admin, return empty
-                    // This might need adjustment if a system user with no assigned emails
-                    // should still see all "system" assigned workflows.
-                    // For now, it returns empty if no emails are present.
-                    // We'll rely on the systemResponsibility logic for system views.
-                    // return res.status(200).json([]); // Commenting this out for now
-                }
-
-                const emailSubqueryConditions = emailsToSearch.map((email, index) => {
-                    params[`subquery_email_${index}`] = email;
-                    return `REGEXP_CONTAINS(LOWER(t2.Emails), CONCAT('(^|[[:space:],])', @subquery_email_${index}, '([[:space:],]|$)'))`;
-                }).join(' OR ');
-
-                // --- START NEW LOGIC FOR SYSTEM RESPONSIBILITY ---
-                const systemResponsibilityValue = 'system'; // Assuming 'system' is the value in Responsibility for system tasks
-                params.systemResponsibilityValue = systemResponsibilityValue; // Add param for system responsibility
-
-                let combinedSubqueryConditions = `LOWER(t2.Responsibility) = @systemResponsibilityValue`; // Always include system tasks
-                if (emailSubqueryConditions) { // If there are actual user emails to search for, combine with OR
-                    combinedSubqueryConditions = `(${emailSubqueryConditions}) OR ${combinedSubqueryConditions}`;
-                }
-                // --- END NEW LOGIC FOR SYSTEM RESPONSIBILITY ---
-
+                // --- START TEMPORARY DEBUGGING QUERY FOR NON-ADMIN LIST VIEW ---
+                // This query is intentionally simplified to check if any Step_ID = 0 rows are returned at all.
+                // It temporarily bypasses user email, system responsibility, search, and client filters.
+                
                 baseQuery = `
                     SELECT t1.*
                     FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\` t1
                     WHERE t1.Step_ID = 0
-                      AND t1.DelCode_w_o__ IN (
-                        SELECT DISTINCT t2.DelCode_w_o__
-                        FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\` t2
-                        WHERE t2.Step_ID != 0
-                          AND (${combinedSubqueryConditions})
-                      )
                 `;
+                
+                // Clear any existing whereClauses and reset params to ensure no other filters are applied
+                whereClauses = []; 
+                params = {
+                    limit: limit, // Still respects frontend limit/offset
+                    offset: offset
+                }; 
+
+                // The finalWhereClause will now always be an empty string because whereClauses is reset
+                const finalWhereClause = whereClauses.length > 0 ? ` AND ${whereClauses.join(' AND ')}` : ''; 
+                const query = `${baseQuery} ${finalWhereClause} ORDER BY t1.Created_at DESC LIMIT @limit OFFSET @offset;`;
+
+                const options = {
+                    query: query,
+                    params: params,
+                };
+                [rows] = await bigQueryClient.query(options);
+
+                // *** IMPORTANT: CHECK THIS LOG IN YOUR SERVER'S TERMINAL ***
+                console.log("Backend: DEBUG QUERY - Data for frontend (first 5 rows):", rows.slice(0, 5));
+                // **********************************************************
+
+                console.log(`Backend /api/data (DEBUG QUERY - List View): Fetched ${rows.length} rows.`);
+
+                // --- END TEMPORARY DEBUGGING QUERY FOR NON-ADMIN LIST VIEW ---
+
             }
-
-            // Add client filter if selected
-            if (selectedClient) {
-                whereClauses.push(`LOWER(t1.Client) = @selectedClient`); // Use t1. for alias
-                params.selectedClient = selectedClient;
-            }
-
-            // Add search term filter if provided
-            if (searchTerm) {
-                const searchCondition = `(LOWER(t1.Delivery_code) LIKE @searchTerm OR LOWER(t1.Short_Description) LIKE @searchTerm OR LOWER(t1.Client) LIKE @searchTerm)`; // Use t1. for alias
-                whereClauses.push(searchCondition);
-                params.searchTerm = `%${searchTerm}%`;
-            }
-
-            const finalWhereClause = whereClauses.length > 0 ? ` AND ${whereClauses.join(' AND ')}` : '';
-            const query = `${baseQuery} ${finalWhereClause} ORDER BY t1.Created_at DESC LIMIT @limit OFFSET @offset;`;
-            params.limit = limit;
-            params.offset = offset;
-
-            const options = {
-                query: query,
-                params: params,
-            };
-            [rows] = await bigQueryClient.query(options);
-
-            // *** CONSOLE LOG REMAINS HERE FOR FURTHER DEBUGGING IF NEEDED ***
-            console.log("Backend: Data for frontend (first 5 rows):", rows.slice(0, 5));
-            // ***************************************************************
-
-            console.log(`Backend /api/data (List View): Fetched ${rows.length} rows.`);
         }
         res.json(rows);
     } catch (error) {
