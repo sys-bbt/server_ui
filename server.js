@@ -139,7 +139,7 @@ app.get('/api/data', async (req, res) => {
         query += ' WHERE ' + conditions.join(' AND ');
     }
 
-    query += ` ORDER BY initiated DESC LIMIT @limit OFFSET @offset`; // Order by initiated date descending
+    query += ` ORDER BY Initiated_Timestamp DESC LIMIT @limit OFFSET @offset`; // Order by initiated date descending
     params.limit = parseInt(limit);
     params.offset = offset;
 
