@@ -20,8 +20,8 @@ app.use(express.json());
 // Define allowed origins for your frontend application
 const allowedOrigins = [
     'http://localhost:3000', // For local React development
-    'http://localhost:3001', // If your React app runs on 3001 (less common, but good to include)
-    'https://scheduler-ui-roan.vercel.app', // Your Vercel deployment domain
+    'http://localhost:3001', // If your React app runs on 3001 locally
+    'https://scheduler-ui-roan.vercel.app', // Your Vercel frontend domain
     // Add any other specific Vercel preview URLs if needed.
     // For example, if you have branch deployments like 'https://scheduler-ui-git-branchname-your-org.vercel.app'
     // You might use a regex for more dynamic preview URLs:
@@ -50,7 +50,7 @@ app.get('/', (req, res) => {
     res.send('BigQuery Express Server is running!');
 });
 
-// API endpoint to fetch data from BigQuery
+// API endpoint to fetch data from BigQuery (used by DeliveryList, Tasklist, DeliveryDetail)
 app.get('/api/data', async (req, res) => {
     const { email, isAdmin, offset = 0, limit = 500, searchTerm, delCode, selectedClient } = req.query;
 
@@ -85,7 +85,7 @@ app.get('/api/data', async (req, res) => {
         params.delCode = delCode;
         console.log(`Filtering by specific DelCode: ${delCode}`);
     } else {
-        // Only apply these filters if a specific delCode is NOT provided
+        // Only apply these filters if a specific delCode is NOT provided (for DeliveryList)
         // This ensures that when delCode is provided, we get all tasks for it.
         // And when not provided (for DeliveryList), we get Step_ID = 0 and other filters.
 
@@ -108,7 +108,6 @@ app.get('/api/data', async (req, res) => {
         }
     }
 
-
     // Construct WHERE clause
     if (conditions.length > 0) {
         query += ` WHERE ` + conditions.join(' AND ');
@@ -126,10 +125,9 @@ app.get('/api/data', async (req, res) => {
         query += ` ORDER BY Step_ID ASC`; // Order tasks by step ID for a single delivery
     }
 
-
     const options = {
         query: query,
-        location: 'US', // Specify your BigQuery dataset location
+        location: 'US', // Specify your BigQuery dataset location (e.g., 'US', 'EU')
         params: params,
     };
 
@@ -147,7 +145,7 @@ app.get('/api/data', async (req, res) => {
 });
 
 
-// API endpoint to fetch unique client names
+// API endpoint to fetch unique client names (used by DeliveryList)
 app.get('/api/persons', async (req, res) => {
     const datasetId = 'BIQuery_data';
     const tableId = 'Workflow_Details';
