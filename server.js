@@ -168,9 +168,9 @@ app.get('/api/data', async (req, res) => {
         params.search = `%${search}%`;
     }
 
-    // Special handling for the first page: show only StepId = 0
+    // Special handling for the first page: show only Step_ID = 0
     if (parseInt(page) === 0) {
-        conditions.push('StepId = 0'); // Assumes 'StepId' column exists
+        conditions.push('Step_ID = 0'); // Assumes 'Step_ID' column exists
     }
 
     if (conditions.length > 0) {
