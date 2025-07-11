@@ -136,19 +136,19 @@ app.get('/api/data', async (req, res) => {
     const isAdmin = ADMIN_EMAILS.includes(email);
     console.log(`User ${email} is an admin: ${isAdmin}`); // For debugging
 
-    // Admin Access Logic: If admin, no email filtering based on 'emails' or 'Responsibility'.
-    // If not admin, filter by 'emails' column OR by 'Responsibility'
+    // Admin Access Logic: If admin, no email filtering based on 'emails' or 'Emails'.
+    // If not admin, filter by 'emails' column OR by 'Emails'
     if (!isAdmin) {
         // Non-admin users:
         // They can see rows where their email is in the 'emails' column (comma-separated)
-        // OR where they are assigned to a task within that workflow (via 'Responsibility' for the same DelCode_w_o__)
+        // OR where they are assigned to a task within that workflow (via 'Emails' for the same DelCode_w_o__)
         conditions.push(`(
             EXISTS(SELECT 1 FROM UNNEST(SPLIT(emails, ',')) as e WHERE TRIM(e) = @userEmail)
             OR
             EXISTS(
                 SELECT 1 FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\` AS T2
                 WHERE T2.DelCode_w_o__ = \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`.DelCode_w_o__
-                AND T2.Responsibility = @userEmail
+                AND T2.Emails = @userEmail
             )
         )`);
         params.userEmail = email;
