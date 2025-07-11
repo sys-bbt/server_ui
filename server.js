@@ -14,13 +14,22 @@ const bigQueryTable = process.env.BIGQUERY_TABLE; // Your main task table
 const bigQueryTable2 = "Per_Key_Per_Day"; // For per-key per-day tracking
 const bigQueryTable3 = "Per_Person_Per_Day"; // For per-person per-day tracking
 
+// Define Admin Emails
+const ADMIN_EMAILS = [
+    "neelam.p@brightbraintech.com",
+    "meghna.j@brightbraintech.com",
+    "zoya.a@brightbraintech.com",
+    "shweta.g@brightbraintech.com",
+    "hitesh.r@brightbraintech.com"
+];
+
 const app = express();
 
 // Middleware setup
 app.use(cors());
 app.use(express.json());
 
-// Debug logging for BigQuery credentials (from HEAD)
+// Debug logging for BigQuery credentials
 console.log('DEBUG: GOOGLE_PROJECT_ID:', process.env.GOOGLE_PROJECT_ID);
 console.log('DEBUG: BIGQUERY_CLIENT_EMAIL:', process.env.BIGQUERY_CLIENT_EMAIL);
 console.log('DEBUG: BIGQUERY_PRIVATE_KEY exists:', !!process.env.BIGQUERY_PRIVATE_KEY);
@@ -56,7 +65,6 @@ async function initializeSheetsClient() {
         console.log('Google Sheets client initialized successfully.');
     } catch (error) {
         console.error('Error initializing Google Sheets client:', error);
-        // Exit process or handle error appropriately
         process.exit(1);
     }
 }
@@ -71,19 +79,18 @@ const updateTaskSchema = Joi.object({
     endDate: Joi.date().iso().allow(null, ''),
     assignTo: Joi.string().required(),
     status: Joi.string().valid('Scheduled', 'In Progress', 'Paused', 'Completed').required(),
-    actualHours: Joi.number().integer().min(0).allow(null), // Assuming this is for Task_Duration_In_Minutes, make it optional as it might be for a different type of update
-    // If you need more specific validation for 'actualHours' based on task status, add it here
+    actualHours: Joi.number().integer().min(0).allow(null),
 });
 
 // Endpoint to fetch people mapping from Google Sheet
 app.get('/api/people-mapping', async (req, res) => {
     try {
         if (!sheetsClient) {
-            await initializeSheetsClient(); // Ensure client is initialized
+            await initializeSheetsClient();
         }
 
         const sheetId = process.env.GOOGLE_SHEET_ID;
-        const sheetRange = process.env.GOOGLE_SHEET_RANGE || 'Sheet1!A:Z'; // Default range
+        const sheetRange = process.env.GOOGLE_SHEET_RANGE || 'Sheet1!A:Z';
 
         const response = await sheetsClient.spreadsheets.values.get({
             spreadsheetId: sheetId,
@@ -92,10 +99,9 @@ app.get('/api/people-mapping', async (req, res) => {
 
         const rows = response.data.values;
         if (!rows || rows.length === 0) {
-            return res.status(200).json([]); // Return empty array if no data
+            return res.status(200).json([]);
         }
 
-        // Assuming the first row is headers
         const headers = rows[0];
         const peopleMapping = rows.slice(1).map(row => {
             let obj = {};
@@ -112,9 +118,13 @@ app.get('/api/people-mapping', async (req, res) => {
     }
 });
 
-// Fetch all deliveries or filter by client/search term with pagination
+// Fetch all deliveries or filter by client/search term with pagination and user-specific logic
 app.get('/api/data', async (req, res) => {
-    const { page = 0, limit = 10, client, search } = req.query; // Default page 0, limit 10
+    const { page = 0, limit = 10, client, search, email } = req.query;
+
+    if (!email) {
+        return res.status(400).json({ error: 'User email is required for data retrieval.' });
+    }
 
     const offset = parseInt(page) * parseInt(limit);
 
@@ -122,31 +132,62 @@ app.get('/api/data', async (req, res) => {
     let conditions = [];
     let params = {};
 
+    // Determine if the current user is an admin
+    const isAdmin = ADMIN_EMAILS.includes(email);
+    console.log(`User ${email} is an admin: ${isAdmin}`); // For debugging
+
+    // Admin Access Logic: If admin, no email filtering based on 'emails' or 'Responsibility'.
+    // If not admin, filter by 'emails' column OR by 'Responsibility'
+    if (!isAdmin) {
+        // Non-admin users:
+        // They can see rows where their email is in the 'emails' column (comma-separated)
+        // OR where they are assigned to a task within that workflow (via 'Responsibility' for the same DelCode_w_o__)
+        conditions.push(`(
+            EXISTS(SELECT 1 FROM UNNEST(SPLIT(emails, ',')) as e WHERE TRIM(e) = @userEmail)
+            OR
+            EXISTS(
+                SELECT 1 FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\` AS T2
+                WHERE T2.DelCode_w_o__ = \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`.DelCode_w_o__
+                AND T2.Responsibility = @userEmail
+            )
+        )`);
+        params.userEmail = email;
+    }
+
+    // Client filter
     if (client) {
         conditions.push('Client = @client');
         params.client = client;
     }
 
+    // Search filter
     if (search) {
-        // Example: Search across multiple text fields for the search term
         conditions.push(
             `(LOWER(Task_Details) LIKE LOWER(@search) OR LOWER(DelCode_w_o__) LIKE LOWER(@search))`
         );
         params.search = `%${search}%`;
     }
 
+    // Special handling for the first page: show only StepId = 0
+    if (parseInt(page) === 0) {
+        conditions.push('StepId = 0'); // Assumes 'StepId' column exists
+    }
+
     if (conditions.length > 0) {
         query += ' WHERE ' + conditions.join(' AND ');
     }
 
-    query += ` ORDER BY Initiated_Timestamp DESC LIMIT @limit OFFSET @offset`; // Order by initiated date descending
+    // Always order by 'initiated' (or your correct timestamp column)
+    // and apply LIMIT/OFFSET for pagination
+    query += ` ORDER BY Initiated_Timestamp DESC LIMIT @limit OFFSET @offset`; // Remember to use the correct column name here
+
     params.limit = parseInt(limit);
     params.offset = offset;
 
     const options = {
         query: query,
         params: params,
-        location: 'US', // Specify your dataset location if not default
+        location: 'US',
     };
 
     try {
@@ -159,9 +200,10 @@ app.get('/api/data', async (req, res) => {
     }
 });
 
+
 // Endpoint to fetch tasks by Key for per-key-per-day data
 app.get('/api/per-key-per-day', async (req, res) => {
-    const { key } = req.query; // Expecting 'key' as a query parameter
+    const { key } = req.query;
 
     if (!key) {
         return res.status(400).json({ error: 'Task Key is required.' });
@@ -194,7 +236,6 @@ app.get('/api/per-key-per-day', async (req, res) => {
 app.put('/api/update-task-status', async (req, res) => {
     const { key, taskName, startDate, endDate, assignTo, status, actualHours, newSchedules } = req.body;
 
-    // Validate request body using Joi
     const { error } = updateTaskSchema.validate({
         key, taskName, startDate, endDate, assignTo, status, actualHours
     });
@@ -203,7 +244,6 @@ app.put('/api/update-task-status', async (req, res) => {
         return res.status(400).send({ error: error.details[0].message });
     }
 
-    // Update main task table
     const updateMainTaskQuery = `
         UPDATE \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
         SET
@@ -226,17 +266,15 @@ app.put('/api/update-task-status', async (req, res) => {
             endDate,
             assignTo,
             status,
-            actualHours: actualHours !== null ? parseInt(actualHours) : null // Ensure integer or null
+            actualHours: actualHours !== null ? parseInt(actualHours) : null
         },
     };
 
     try {
-        // Execute main task update
         const [mainJob] = await bigQueryClient.createQueryJob(mainTaskOptions);
         await mainJob.getQueryResults();
         console.log(`Task with Key ${key} updated in main table.`);
 
-        // Process and upsert into Per_Key_Per_Day table if newSchedules are provided
         if (newSchedules && Array.isArray(newSchedules) && newSchedules.length > 0) {
             for (const schedule of newSchedules) {
                 const { date, duration } = schedule;
@@ -259,11 +297,7 @@ app.put('/api/update-task-status', async (req, res) => {
             console.log('Per-key-per-day entries upserted successfully.');
         }
 
-        // Process and upsert into Per_Person_Per_Day table based on newSchedules and assignTo
-        // This logic assumes `newSchedules` will contain dates and durations needed to update per-person-per-day sums.
-        // You might need to refine this based on how you calculate per-person-per-day.
         if (newSchedules && Array.isArray(newSchedules) && newSchedules.length > 0 && assignTo) {
-            // Aggregate duration per person per day from newSchedules for the assigned person
             const perPersonDailyDurations = {};
             newSchedules.forEach(schedule => {
                 if (perPersonDailyDurations[schedule.date]) {
@@ -292,7 +326,6 @@ app.put('/api/update-task-status', async (req, res) => {
             }
             console.log('Per-person-per-day entries upserted successfully.');
         }
-
 
         res.status(200).json({ message: 'Task and schedules updated successfully' });
 
@@ -332,7 +365,7 @@ app.delete('/api/data/:deliveryCode', async (req, res) => {
 });
 
 
-const PORT = process.env.PORT || 5000; // Use 5000 as default as per common practice
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
