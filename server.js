@@ -14,8 +14,30 @@ const bigQueryTable3 = "Per_Person_Per_Day";
 
 const app = express();
 
-// Middleware setup
-app.use(cors());
+// Define allowed origins for CORS
+const allowedOrigins = [
+    'http://localhost:3000', // For local development
+    'https://scheduler-ui-roan.vercel.app' // Your Vercel frontend URL
+];
+
+// CORS Middleware setup
+app.use(cors({
+    origin: function (origin, callback) {
+        // Allow requests with no origin (like mobile apps or curl requests)
+        // or if the origin is in our allowed list.
+        if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+            callback(null, true);
+        } else {
+            const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+            callback(new Error(msg), false);
+        }
+    },
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE', // Allowed HTTP methods
+    credentials: true, // Allow cookies to be sent
+    optionsSuccessStatus: 204 // Some legacy browsers (IE11, various SmartTVs) choke on 200
+}));
+
+// Body parser middleware
 app.use(express.json());
 
 console.log('DEBUG: GOOGLE_PROJECT_ID:', process.env.GOOGLE_PROJECT_ID);
