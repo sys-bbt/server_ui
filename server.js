@@ -74,12 +74,9 @@ app.get('/api/data', async (req, res) => {
 
     // Check if userEmail is provided and if it's NOT an admin email
     if (userEmail && !ADMIN_EMAILS_BACKEND.includes(userEmail)) {
-        // If not an admin, filter tasks by their assigned email
-        // Assuming the 'Email' column in your main task table stores the assigned person's email
-        // Or you might need to filter by 'Responsibility' if that's the matching field.
-        // I'm using 'Email' as it's explicitly sent in the frontend's scheduledData.Email
-        query += ` WHERE Email = @userEmail`;
-        params = { userEmail: userEmail };
+        // Corrected: Changed 'Email' to 'Emails' based on BigQuery error
+        query += ` WHERE Emails LIKE @userEmail`; // Use LIKE for partial matches if 'Emails' contains multiple
+        params = { userEmail: `%${userEmail}%` }; // Add wildcards for LIKE
         console.log(`Filtering tasks for non-admin user: ${userEmail}`);
     } else if (userEmail && ADMIN_EMAILS_BACKEND.includes(userEmail)) {
         console.log(`Fetching all tasks for admin user: ${userEmail}`);
