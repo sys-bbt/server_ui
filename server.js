@@ -49,11 +49,14 @@ const ADMIN_EMAILS_BACKEND = [
 const SYSTEM_EMAIL_FOR_GLOBAL_TASKS = "systems@brightbraintech.com";
 
 
-// Endpoint to fetch people mapping
+// Endpoint to fetch people mapping - UPDATED TO QUERY NATIVE TABLE
 app.get('/api/people-mapping', async (req, res) => {
+    // IMPORTANT: Replace 'People_To_Email_Mapping_Native' with the exact name
+    // you used when creating the native BigQuery table from your Google Sheet.
+    const NATIVE_PEOPLE_TABLE = 'People_To_Email_Mapping_Native'; // <--- CHANGE THIS TO YOUR NEW NATIVE TABLE NAME
     const query = `
         SELECT Current_Employes, Emp_Emails
-        FROM \`${projectId}.${bigQueryDataset}.People_To_Email_Mapping\`
+        FROM \`${projectId}.${bigQueryDataset}.${NATIVE_PEOPLE_TABLE}\`
     `;
 
     try {
