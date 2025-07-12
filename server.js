@@ -165,12 +165,17 @@ app.get('/api/per-key-per-day-by-key', async (req, res) => {
         FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\`
         WHERE Key = @key
     `;
-    const params = { key: key };
+    const params = { key: parseInt(key, 10) }; // Convert key to INT64 for comparison
+    // Define types for parameters, especially if they can be null or need explicit casting
+    const queryTypes = {
+        key: 'INT64' // Explicitly define key as INT64
+    };
 
     try {
         const [rows] = await bigQueryClient.query({
             query: query,
             params: params,
+            types: queryTypes, // Pass types here
             location: 'US', // Specify your BigQuery dataset location
         });
 
@@ -242,10 +247,9 @@ app.post('/api/post', async (req, res) => {
     // Convert timestamps to BigQuery compatible format for mainTask
     const formatTimestamp = (timestamp) => {
         if (!timestamp) return null;
-        // The timestamp from frontend is already ISO string, no need to replace ' UTC'
         const momentObj = moment.utc(timestamp);
-        // For DATETIME type, format without timezone info
-        return momentObj.isValid() ? momentObj.format('YYYY-MM-DD HH:mm:ss.SSSSSS') : null;
+        // For TIMESTAMP type, format with full precision and timezone (UTC)
+        return momentObj.isValid() ? momentObj.format('YYYY-MM-DD HH:mm:ss.SSSSSS') + ' UTC' : null;
     };
 
     const formattedPlannedStartTimestamp = formatTimestamp(mainTask.Planned_Start_Timestamp);
@@ -268,7 +272,6 @@ app.post('/api/post', async (req, res) => {
         Planned_Delivery_Timestamp: formattedPlannedDeliveryTimestamp,
         Responsibility: mainTask.Responsibility,
         Current_Status: mainTask.Current_Status,
-        // Removed 'Email' here as it's not in your BigQuery schema
         Emails: mainTask.Emails,
         Total_Tasks: mainTask.Total_Tasks,
         Completed_Tasks: mainTask.Completed_Tasks,
@@ -282,10 +285,10 @@ app.post('/api/post', async (req, res) => {
 
     // Define types for nullable parameters in mainTaskRow
     const mainTaskParameterTypes = {
-        Planned_Start_Timestamp: 'DATETIME', // Changed to DATETIME
-        Planned_Delivery_Timestamp: 'DATETIME', // Changed to DATETIME
-        Created_at: 'DATETIME', // Changed to DATETIME
-        Updated_at: 'DATETIME', // Changed to DATETIME
+        Planned_Start_Timestamp: 'TIMESTAMP', // Changed back to TIMESTAMP
+        Planned_Delivery_Timestamp: 'TIMESTAMP', // Changed back to TIMESTAMP
+        Created_at: 'TIMESTAMP', // Changed back to TIMESTAMP
+        Updated_at: 'TIMESTAMP', // Changed back to TIMESTAMP
         Emails: 'STRING',
         Responsibility: 'STRING',
         Client: 'STRING',
@@ -296,11 +299,10 @@ app.post('/api/post', async (req, res) => {
     };
 
     // Define schema for Per_Key_Per_Day table inserts
-    // Assuming 'Duration' stores minutes as INTEGER, 'Day' as DATE, 'Planned_Delivery_Slot' is NULLABLE STRING
     const perKeyPerDaySchema = [
-        { name: 'Key', type: 'STRING' },
+        { name: 'Key', type: 'STRING' }, // Keep as STRING here, will cast in query if needed
         { name: 'Day', type: 'DATE' },
-        { name: 'Duration', type: 'INTEGER' },
+        { name: 'Duration', type: 'INTEGER' }, // Storing minutes as INTEGER
         { name: 'Duration_Unit', type: 'STRING' },
         { name: 'Planned_Delivery_Slot', type: 'STRING', mode: 'NULLABLE' },
         { name: 'Responsibility', type: 'STRING' },
@@ -350,8 +352,8 @@ app.post('/api/post', async (req, res) => {
         `;
         const deletePerKeyOptions = {
             query: deletePerKeyQuery,
-            params: { Key: mainTask.Key }, // Use mainTask.Key for deletion
-            types: { Key: 'STRING' },
+            params: { Key: parseInt(mainTask.Key, 10) }, // Convert Key to INT64 for deletion
+            types: { Key: 'INT64' }, // Explicitly define type for Key as INT64
             location: 'US',
         };
         const [deleteJob] = await bigQueryClient.createQueryJob(deletePerKeyOptions);
@@ -373,7 +375,7 @@ app.post('/api/post', async (req, res) => {
             await bigQueryClient
                 .dataset(bigQueryDataset)
                 .table(bigQueryTable2)
-                .insert(insertRows, { schema: perKeyPerDaySchema }); // ADDED SCHEMA HERE
+                .insert(insertRows, { schema: perKeyPerDaySchema });
             console.log(`New Per_Key_Per_Day entries for Key ${mainTask.Key} inserted successfully.`);
         }
 
