@@ -49,7 +49,7 @@ const ADMIN_EMAILS_BACKEND = [
 const SYSTEM_EMAIL_FOR_GLOBAL_TASKS = "systems@brightbraintech.com";
 
 
-// New endpoint to fetch people mapping (already added in previous turn)
+// Endpoint to fetch people mapping
 app.get('/api/people-mapping', async (req, res) => {
     const query = `
         SELECT Current_Employes, Emp_Emails
@@ -69,20 +69,22 @@ app.get('/api/people-mapping', async (req, res) => {
     }
 });
 
-// Modified /api/data route (GET all tasks with filtering for non-admins)
+// Modified /api/data route (GET workflow headers only, with filtering for non-admins)
 app.get('/api/data', async (req, res) => {
     const userEmail = req.query.email; // Get email from query parameter
     let query;
     let params = {};
 
+    // Base query for workflow headers
+    let baseQuery = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\` WHERE Step_ID = 0`;
+
     // Check if userEmail is provided and if it's NOT an admin email
     if (userEmail && !ADMIN_EMAILS_BACKEND.includes(userEmail)) {
-        // Non-admin user: Fetch all DelCode_w_o__ that have any task assigned to them or 'System'
-        // Then, select all tasks belonging to those DelCode_w_o__
+        // Non-admin user: Fetch only workflow headers (Step_ID = 0)
+        // where any task within that workflow is assigned to them or 'System'
         query = `
-            SELECT *
-            FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
-            WHERE DelCode_w_o__ IN (
+            ${baseQuery}
+            AND DelCode_w_o__ IN (
                 SELECT DISTINCT DelCode_w_o__
                 FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
                 WHERE Emails LIKE @userEmail OR Emails LIKE @systemEmail
@@ -91,14 +93,14 @@ app.get('/api/data', async (req, res) => {
             userEmail: `%${userEmail}%`,
             systemEmail: `%${SYSTEM_EMAIL_FOR_GLOBAL_TASKS}%`
         };
-        console.log(`Filtering tasks for non-admin user: ${userEmail} (fetching all tasks within relevant workflows)`);
+        console.log(`Filtering workflow headers for non-admin user: ${userEmail}`);
     } else {
-        // Admin user or no user email provided: Fetch all tasks
-        query = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\``;
+        // Admin user or no user email provided: Fetch all workflow headers
+        query = baseQuery;
         if (userEmail && ADMIN_EMAILS_BACKEND.includes(userEmail)) {
-            console.log(`Fetching all tasks for admin user: ${userEmail}`);
+            console.log(`Fetching all workflow headers for admin user: ${userEmail}`);
         } else {
-            console.log(`Fetching all tasks (no user email provided or default behavior)`);
+            console.log(`Fetching all workflow headers (no user email provided or default behavior)`);
         }
     }
 
@@ -110,10 +112,34 @@ app.get('/api/data', async (req, res) => {
         });
         res.status(200).json(rows);
     } catch (error) {
-        console.error('Error fetching data from BigQuery:', error);
+        console.error('Error fetching data from BigQuery for /api/data:', error);
         res.status(500).send({ error: 'Failed to fetch data from BigQuery.' });
     }
 });
+
+// NEW ENDPOINT: /api/workflow-details/:deliveryCode (GET all tasks for a specific workflow)
+app.get('/api/workflow-details/:deliveryCode', async (req, res) => {
+    const { deliveryCode } = req.params;
+    const query = `
+        SELECT *
+        FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
+        WHERE DelCode_w_o__ = @deliveryCode
+    `;
+    const params = { deliveryCode: deliveryCode };
+
+    try {
+        const [rows] = await bigQueryClient.query({
+            query: query,
+            params: params,
+            location: 'US',
+        });
+        res.status(200).json(rows);
+    } catch (error) {
+        console.error(`Error fetching workflow details for ${deliveryCode} from BigQuery:`, error);
+        res.status(500).send({ error: `Failed to fetch workflow details for ${deliveryCode}.` });
+    }
+});
+
 
 // Existing /api/per-key-per-day route
 app.get('/api/per-key-per-day', async (req, res) => {
