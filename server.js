@@ -10,7 +10,7 @@ dotenv.config();
 const projectId = process.env.GOOGLE_PROJECT_ID;
 const bigQueryDataset = process.env.BIGQUERY_DATASET;
 const bigQueryTable = process.env.BIGQUERY_TABLE; // Your main task table
-const bigQueryTable2 = "Per_Key_Per_Day";
+const bigQueryTable2 = "Per_Key_Per_Day"; // Per_Key_Per_Day table
 const bigQueryTable3 = "Per_Person_Per_Day";
 
 const app = express();
@@ -38,7 +38,6 @@ const bigQueryClient = new BigQuery({
 
 // Define admin emails on the backend for consistency and security
 const ADMIN_EMAILS_BACKEND = [
-    "systems@brightbraintech.com",
     "neelam.p@brightbraintech.com",
     "meghna.j@brightbraintech.com",
     "zoya.a@brightbraintech.com",
@@ -192,53 +191,51 @@ app.get('/api/per-person-per-day', async (req, res) => {
     }
 });
 
-// Existing POST route
+// Modified POST route to handle both main task and Per_Key_Per_Day updates
 app.post('/api/post', async (req, res) => {
-    const {
-        Key, Delivery_code, DelCode_w_o__, Step_ID, Task_Details, Frequency___Timeline,
-        Client, Short_Description, Planned_Start_Timestamp, Planned_Delivery_Timestamp,
-        Responsibility, Current_Status, Email, Emails, Total_Tasks, Completed_Tasks,
-        Planned_Tasks, Percent_Tasks_Completed, Created_at, Updated_at,
-        Time_Left_For_Next_Task_dd_hh_mm_ss, Card_Corner_Status, sliders
-    } = req.body;
+    const { mainTask, perKeyPerDayRows } = req.body;
 
-    // Convert timestamps to BigQuery compatible format if they are not null
+    // Convert timestamps to BigQuery compatible format for mainTask
     const formatTimestamp = (timestamp) => {
         if (!timestamp) return null;
         const momentObj = moment.utc(timestamp.replace(' UTC', ''));
         return momentObj.isValid() ? momentObj.format('YYYY-MM-DD HH:mm:ss.SSSSSS') : null;
     };
 
-    const formattedPlannedStartTimestamp = formatTimestamp(Planned_Start_Timestamp);
-    const formattedPlannedDeliveryTimestamp = formatTimestamp(Planned_Delivery_Timestamp);
+    const formattedPlannedStartTimestamp = formatTimestamp(mainTask.Planned_Start_Timestamp);
+    const formattedPlannedDeliveryTimestamp = formatTimestamp(mainTask.Planned_Delivery_Timestamp);
+    const formattedCreatedAt = formatTimestamp(mainTask.Created_at);
+    const formattedUpdatedAt = formatTimestamp(mainTask.Updated_at);
+
 
     // Prepare data for the main task table update
     const mainTaskRow = {
-        Key: Key,
-        Delivery_code: Delivery_code,
-        DelCode_w_o__: DelCode_w_o__,
-        Step_ID: Step_ID,
-        Task_Details: Task_Details,
-        Frequency___Timeline: Frequency___Timeline,
-        Client: Client,
-        Short_Description: Short_Description,
+        Key: mainTask.Key,
+        Delivery_code: mainTask.Delivery_code,
+        DelCode_w_o__: mainTask.DelCode_w_o__,
+        Step_ID: mainTask.Step_ID,
+        Task_Details: mainTask.Task_Details,
+        Frequency___Timeline: mainTask.Frequency___Timeline,
+        Client: mainTask.Client,
+        Short_Description: mainTask.Short_Description,
         Planned_Start_Timestamp: formattedPlannedStartTimestamp,
         Planned_Delivery_Timestamp: formattedPlannedDeliveryTimestamp,
-        Responsibility: Responsibility,
-        Current_Status: Current_Status,
-        Email: Email,
-        Emails: Emails,
-        Total_Tasks: Total_Tasks,
-        Completed_Tasks: Completed_Tasks,
-        Planned_Tasks: Planned_Tasks,
-        Percent_Tasks_Completed: Percent_Tasks_Completed,
-        Created_at: formatTimestamp(Created_at),
-        Updated_at: formatTimestamp(Updated_at),
-        Time_Left_For_Next_Task_dd_hh_mm_ss: Time_Left_For_Next_Task_dd_hh_mm_ss,
-        Card_Corner_Status: Card_Corner_Status,
+        Responsibility: mainTask.Responsibility,
+        Current_Status: mainTask.Current_Status,
+        Email: mainTask.Email,
+        Emails: mainTask.Emails,
+        Total_Tasks: mainTask.Total_Tasks,
+        Completed_Tasks: mainTask.Completed_Tasks,
+        Planned_Tasks: mainTask.Planned_Tasks,
+        Percent_Tasks_Completed: mainTask.Percent_Tasks_Completed,
+        Created_at: formattedCreatedAt,
+        Updated_at: formattedUpdatedAt,
+        Time_Left_For_Next_Task_dd_hh_mm_ss: mainTask.Time_Left_For_Next_Task_dd_hh_mm_ss,
+        Card_Corner_Status: mainTask.Card_Corner_Status,
     };
 
     try {
+        // 1. Update the main task table
         const updateMainTaskQuery = `
             UPDATE \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
             SET
@@ -272,27 +269,39 @@ app.post('/api/post', async (req, res) => {
         };
         const [mainTaskJob] = await bigQueryClient.createQueryJob(updateMainTaskOptions);
         await mainTaskJob.getQueryResults();
-        console.log(`Main task with Key ${Key} updated successfully.`);
+        console.log(`Main task with Key ${mainTask.Key} updated successfully.`);
 
+        // 2. Delete existing Per_Key_Per_Day entries for this Key
         const deletePerKeyQuery = `
             DELETE FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\`
             WHERE Key = @Key
         `;
         const deletePerKeyOptions = {
             query: deletePerKeyQuery,
-            params: { Key: Key },
+            params: { Key: mainTask.Key }, // Use mainTask.Key for deletion
             location: 'US',
         };
         const [deleteJob] = await bigQueryClient.createQueryJob(deletePerKeyOptions);
         await deleteJob.getQueryResults();
-        console.log(`Existing Per_Key_Per_Day entries for Key ${Key} deleted.`);
+        console.log(`Existing Per_Key_Per_Day entries for Key ${mainTask.Key} deleted.`);
 
-        if (perKeyPerDayRows.length > 0) {
+        // 3. Insert new Per_Key_Per_Day entries
+        if (perKeyPerDayRows && perKeyPerDayRows.length > 0) {
+            // BigQuery insert expects an array of objects
+            const insertRows = perKeyPerDayRows.map(row => ({
+                Key: row.Key,
+                Day: row.Day, // Should be 'YYYY-MM-DD'
+                Duration: row.Duration,
+                Duration_Unit: row.Duration_Unit,
+                Planned_Delivery_Slot: row.Planned_Delivery_Slot,
+                Responsibility: row.Responsibility,
+            }));
+
             await bigQueryClient
                 .dataset(bigQueryDataset)
                 .table(bigQueryTable2)
-                .insert(perKeyPerDayRows);
-            console.log(`New Per_Key_Per_Day entries for Key ${Key} inserted successfully.`);
+                .insert(insertRows);
+            console.log(`New Per_Key_Per_Day entries for Key ${mainTask.Key} inserted successfully.`);
         }
 
         res.status(200).send({ message: 'Task and associated schedule data updated successfully.' });
