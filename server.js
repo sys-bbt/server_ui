@@ -1,10 +1,9 @@
-// In server.js, after other imports and app setup:
-
 const express = require('express');
 const { BigQuery } = require('@google-cloud/bigquery');
 const cors = require('cors');
 const path = require('path');
 const dotenv = require('dotenv');
+const moment = require('moment'); // Import moment for date handling
 
 dotenv.config();
 
@@ -37,9 +36,17 @@ const bigQueryClient = new BigQuery({
     },
 });
 
-// Existing routes (add your new route before the listen call)
+// Define admin emails on the backend for consistency and security
+const ADMIN_EMAILS_BACKEND = [
+    "neelam.p@brightbraintech.com",
+    "meghna.j@brightbraintech.com",
+    "zoya.a@brightbraintech.com",
+    "shweta.g@brightbraintech.com",
+    "hitesh.r@brightbraintech.com"
+];
 
-// New endpoint to fetch people mapping
+
+// New endpoint to fetch people mapping (already added in previous turn)
 app.get('/api/people-mapping', async (req, res) => {
     const query = `
         SELECT Current_Employes, Emp_Emails
@@ -48,11 +55,9 @@ app.get('/api/people-mapping', async (req, res) => {
 
     try {
         const [rows] = await bigQueryClient.query(query);
-        // Ensure the data is in the format expected by the frontend
-        // For example, if Emp_Emails can be multiple, you might want to split them
         const formattedRows = rows.map(row => ({
             Current_Employes: row.Current_Employes,
-            Emp_Emails: row.Emp_Emails // Assuming Emp_Emails is a single email string or comma-separated
+            Emp_Emails: row.Emp_Emails
         }));
         res.status(200).json(formattedRows);
     } catch (error) {
@@ -61,11 +66,33 @@ app.get('/api/people-mapping', async (req, res) => {
     }
 });
 
-// Existing /api/data route (GET all tasks)
+// Modified /api/data route (GET all tasks with filtering for non-admins)
 app.get('/api/data', async (req, res) => {
-    const query = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\``;
+    const userEmail = req.query.email; // Get email from query parameter
+    let query = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\``;
+    let params = {};
+
+    // Check if userEmail is provided and if it's NOT an admin email
+    if (userEmail && !ADMIN_EMAILS_BACKEND.includes(userEmail)) {
+        // If not an admin, filter tasks by their assigned email
+        // Assuming the 'Email' column in your main task table stores the assigned person's email
+        // Or you might need to filter by 'Responsibility' if that's the matching field.
+        // I'm using 'Email' as it's explicitly sent in the frontend's scheduledData.Email
+        query += ` WHERE Email = @userEmail`;
+        params = { userEmail: userEmail };
+        console.log(`Filtering tasks for non-admin user: ${userEmail}`);
+    } else if (userEmail && ADMIN_EMAILS_BACKEND.includes(userEmail)) {
+        console.log(`Fetching all tasks for admin user: ${userEmail}`);
+    } else {
+        console.log(`Fetching all tasks (no user email provided or default behavior)`);
+    }
+
     try {
-        const [rows] = await bigQueryClient.query(query);
+        const [rows] = await bigQueryClient.query({
+            query: query,
+            params: params,
+            location: 'US', // Specify your BigQuery dataset location
+        });
         res.status(200).json(rows);
     } catch (error) {
         console.error('Error fetching data from BigQuery:', error);
@@ -123,10 +150,6 @@ app.post('/api/post', async (req, res) => {
     // Convert timestamps to BigQuery compatible format if they are not null
     const formatTimestamp = (timestamp) => {
         if (!timestamp) return null;
-        // Assuming timestamp is already in "YYYY-MM-DD HH:mm:ss.SSSSSS UTC" format from frontend
-        // BigQuery TIMESTAMP type expects UTC, without the " UTC" suffix if passed as a string literal
-        // For parameterized queries, it's often better to pass as a Date object or ISO string without timezone suffix
-        // Let's ensure it's a valid ISO string for BigQuery's TIMESTAMP type
         const momentObj = moment.utc(timestamp.replace(' UTC', ''));
         return momentObj.isValid() ? momentObj.format('YYYY-MM-DD HH:mm:ss.SSSSSS') : null;
     };
@@ -154,28 +177,13 @@ app.post('/api/post', async (req, res) => {
         Completed_Tasks: Completed_Tasks,
         Planned_Tasks: Planned_Tasks,
         Percent_Tasks_Completed: Percent_Tasks_Completed,
-        Created_at: formatTimestamp(Created_at), // Ensure Created_at is also formatted
+        Created_at: formatTimestamp(Created_at),
         Updated_at: formatTimestamp(Updated_at),
         Time_Left_For_Next_Task_dd_hh_mm_ss: Time_Left_For_Next_Task_dd_hh_mm_ss,
         Card_Corner_Status: Card_Corner_Status,
     };
 
-    // Prepare data for Per_Key_Per_Day table (sliders data)
-    const perKeyPerDayRows = sliders.map(slider => ({
-        Key: Key,
-        Day: slider.day, // YYYY-MM-DD
-        Duration: slider.duration, // minutes
-        Slot: slider.slot,
-        Responsibility: slider.personResponsible, // Person Responsible for this specific day/duration
-    }));
-
-    // Start a transaction or use a sequence of operations
     try {
-        // 1. Update/Insert into the main task table
-        // Use a MERGE statement or check for existence and then UPDATE/INSERT
-        // For simplicity, let's assume an UPDATE based on Key for now.
-        // If Key is unique and always exists for updates, this is fine.
-        // If it might be a new task, you'd need an INSERT or MERGE.
         const updateMainTaskQuery = `
             UPDATE \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
             SET
@@ -205,13 +213,12 @@ app.post('/api/post', async (req, res) => {
         const updateMainTaskOptions = {
             query: updateMainTaskQuery,
             params: mainTaskRow,
-            location: 'US', // Specify your BigQuery dataset location
+            location: 'US',
         };
         const [mainTaskJob] = await bigQueryClient.createQueryJob(updateMainTaskOptions);
         await mainTaskJob.getQueryResults();
         console.log(`Main task with Key ${Key} updated successfully.`);
 
-        // 2. Delete existing entries for this Key in Per_Key_Per_Day table to avoid duplicates
         const deletePerKeyQuery = `
             DELETE FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\`
             WHERE Key = @Key
@@ -225,9 +232,7 @@ app.post('/api/post', async (req, res) => {
         await deleteJob.getQueryResults();
         console.log(`Existing Per_Key_Per_Day entries for Key ${Key} deleted.`);
 
-        // 3. Insert new entries into Per_Key_Per_Day table
         if (perKeyPerDayRows.length > 0) {
-            // BigQuery insertRows can take an array of rows
             await bigQueryClient
                 .dataset(bigQueryDataset)
                 .table(bigQueryTable2)
@@ -235,20 +240,10 @@ app.post('/api/post', async (req, res) => {
             console.log(`New Per_Key_Per_Day entries for Key ${Key} inserted successfully.`);
         }
 
-        // 4. Update or insert into Per_Person_Per_Day (aggregated data)
-        // This part needs careful consideration. If you want to aggregate
-        // the new slider data into Per_Person_Per_Day, you'll need a more complex
-        // MERGE or series of DELETE/INSERT/UPDATE statements that sum durations
-        // for each person per day.
-        // For now, let's assume Per_Person_Per_Day is derived or updated separately
-        // or that this POST only affects the main task and per-key-per-day.
-        // If you need real-time aggregation here, it's a more advanced BigQuery SQL task.
-
         res.status(200).send({ message: 'Task and associated schedule data updated successfully.' });
 
     } catch (error) {
         console.error('Error updating task and schedule in BigQuery:', error);
-        // Log BigQuery insert errors if available
         if (error.response && error.response.insertErrors) {
             console.error('BigQuery specific insert errors details:');
             error.response.insertErrors.forEach((insertError, index) => {
@@ -256,7 +251,7 @@ app.post('/api/post', async (req, res) => {
                 insertError.errors.forEach(e => console.error(`    - Reason: ${e.reason}, Message: ${e.message}`));
                 console.error('  Raw row that failed:', JSON.stringify(insertError.row, null, 2));
             });
-        } else if (error.code && error.errors) { // General Google Cloud error format
+        } else if (error.code && error.errors) {
             console.error('Google Cloud API Error:', JSON.stringify(error.errors, null, 2));
         }
 
