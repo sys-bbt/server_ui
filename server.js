@@ -153,7 +153,51 @@ app.get('/api/workflow-details/:deliveryCode', async (req, res) => {
 });
 
 
-// Existing /api/per-key-per-day route
+// NEW ENDPOINT: /api/per-key-per-day-by-key
+app.get('/api/per-key-per-day-by-key', async (req, res) => {
+    const { key } = req.query; // Get the key from query parameters
+    if (!key) {
+        return res.status(400).send({ error: 'Key parameter is required.' });
+    }
+
+    const query = `
+        SELECT Key, Day, Duration, Duration_Unit, Planned_Delivery_Slot, Responsibility
+        FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\`
+        WHERE Key = @key
+    `;
+    const params = { key: key };
+
+    try {
+        const [rows] = await bigQueryClient.query({
+            query: query,
+            params: params,
+            location: 'US', // Specify your BigQuery dataset location
+        });
+
+        // Return the data in a structure similar to how per-key-per-day was grouped
+        // This makes it easier for the frontend to consume
+        const groupedData = {
+            totalDuration: 0,
+            entries: []
+        };
+        rows.forEach(row => {
+            groupedData.entries.push(row);
+            groupedData.totalDuration += row.Duration || 0; // Assuming Duration is the hours
+        });
+
+        if (rows.length === 0) {
+            return res.status(404).send({ message: 'No entries found for this key.' });
+        }
+
+        res.status(200).json(groupedData);
+    } catch (error) {
+        console.error(`Error fetching Per_Key_Per_Day data for Key ${key} from BigQuery:`, error);
+        res.status(500).send({ error: `Failed to fetch Per_Key_Per_Day data for Key ${key}.` });
+    }
+});
+
+
+// Existing /api/per-key-per-day route (kept for other potential uses)
 app.get('/api/per-key-per-day', async (req, res) => {
     const query = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\``;
     try {
@@ -198,7 +242,8 @@ app.post('/api/post', async (req, res) => {
     // Convert timestamps to BigQuery compatible format for mainTask
     const formatTimestamp = (timestamp) => {
         if (!timestamp) return null;
-        const momentObj = moment.utc(timestamp.replace(' UTC', ''));
+        // The timestamp from frontend is already ISO string, no need to replace ' UTC'
+        const momentObj = moment.utc(timestamp);
         return momentObj.isValid() ? momentObj.format('YYYY-MM-DD HH:mm:ss.SSSSSS') : null;
     };
 
@@ -234,6 +279,23 @@ app.post('/api/post', async (req, res) => {
         Card_Corner_Status: mainTask.Card_Corner_Status,
     };
 
+    // Define types for nullable parameters in mainTaskRow
+    const mainTaskParameterTypes = {
+        Planned_Start_Timestamp: 'TIMESTAMP',
+        Planned_Delivery_Timestamp: 'TIMESTAMP',
+        Created_at: 'TIMESTAMP',
+        Updated_at: 'TIMESTAMP',
+        Email: 'STRING', // Assuming Email can be null/empty string
+        Emails: 'STRING', // Assuming Emails can be null/empty string
+        Responsibility: 'STRING', // Assuming Responsibility can be null/empty string
+        Client: 'STRING',
+        Short_Description: 'STRING',
+        Frequency___Timeline: 'STRING',
+        Time_Left_For_Next_Task_dd_hh_mm_ss: 'STRING',
+        Card_Corner_Status: 'STRING',
+        // Add other fields that might be null and their types
+    };
+
     try {
         // 1. Update the main task table
         const updateMainTaskQuery = `
@@ -265,6 +327,7 @@ app.post('/api/post', async (req, res) => {
         const updateMainTaskOptions = {
             query: updateMainTaskQuery,
             params: mainTaskRow,
+            types: mainTaskParameterTypes, // <--- ADDED THIS LINE
             location: 'US',
         };
         const [mainTaskJob] = await bigQueryClient.createQueryJob(updateMainTaskOptions);
@@ -279,6 +342,7 @@ app.post('/api/post', async (req, res) => {
         const deletePerKeyOptions = {
             query: deletePerKeyQuery,
             params: { Key: mainTask.Key }, // Use mainTask.Key for deletion
+            types: { Key: 'STRING' }, // Explicitly define type for Key if it can be null/undefined in params
             location: 'US',
         };
         const [deleteJob] = await bigQueryClient.createQueryJob(deletePerKeyOptions);
@@ -339,6 +403,7 @@ app.delete('/api/data/:deliveryCode', async (req, res) => {
     const options = {
         query: query,
         params: { deliveryCode },
+        types: { deliveryCode: 'STRING' }, // Explicitly define type for deliveryCode
     };
 
     try {
