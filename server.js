@@ -78,12 +78,18 @@ app.get('/api/data', async (req, res) => {
     // Check if userEmail is provided and if it's NOT an admin email
     if (userEmail && !ADMIN_EMAILS_BACKEND.includes(userEmail)) {
         // Non-admin user: show tasks assigned to them OR tasks assigned to 'System'
-        query += ` WHERE Emails LIKE @userEmail OR Emails LIKE @systemEmail`;
+        // OR any task belonging to a workflow where they or system are assigned.
+        query += ` WHERE (Emails LIKE @userEmail OR Emails LIKE @systemEmail)
+                OR DelCode_w_o__ IN (
+                    SELECT DelCode_w_o__
+                    FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
+                    WHERE Emails LIKE @userEmail OR Emails LIKE @systemEmail
+                )`;
         params = {
             userEmail: `%${userEmail}%`,
             systemEmail: `%${SYSTEM_EMAIL_FOR_GLOBAL_TASKS}%`
         };
-        console.log(`Filtering tasks for non-admin user: ${userEmail} (including System tasks)`);
+        console.log(`Filtering tasks for non-admin user: ${userEmail} (including System tasks and associated workflows)`);
     } else if (userEmail && ADMIN_EMAILS_BACKEND.includes(userEmail)) {
         console.log(`Fetching all tasks for admin user: ${userEmail}`);
         // No WHERE clause needed for admins, query remains 'SELECT * FROM ...'
