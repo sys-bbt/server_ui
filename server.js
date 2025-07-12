@@ -45,6 +45,9 @@ const ADMIN_EMAILS_BACKEND = [
     "hitesh.r@brightbraintech.com"
 ];
 
+// Define the special "System" email for tasks that should be globally visible to non-admins
+const SYSTEM_EMAIL_FOR_GLOBAL_TASKS = "systems@brightbraintech.com";
+
 
 // New endpoint to fetch people mapping (already added in previous turn)
 app.get('/api/people-mapping', async (req, res) => {
@@ -74,14 +77,19 @@ app.get('/api/data', async (req, res) => {
 
     // Check if userEmail is provided and if it's NOT an admin email
     if (userEmail && !ADMIN_EMAILS_BACKEND.includes(userEmail)) {
-        // Corrected: Changed 'Email' to 'Emails' based on BigQuery error
-        query += ` WHERE Emails LIKE @userEmail`; // Use LIKE for partial matches if 'Emails' contains multiple
-        params = { userEmail: `%${userEmail}%` }; // Add wildcards for LIKE
-        console.log(`Filtering tasks for non-admin user: ${userEmail}`);
+        // Non-admin user: show tasks assigned to them OR tasks assigned to 'System'
+        query += ` WHERE Emails LIKE @userEmail OR Emails LIKE @systemEmail`;
+        params = {
+            userEmail: `%${userEmail}%`,
+            systemEmail: `%${SYSTEM_EMAIL_FOR_GLOBAL_TASKS}%`
+        };
+        console.log(`Filtering tasks for non-admin user: ${userEmail} (including System tasks)`);
     } else if (userEmail && ADMIN_EMAILS_BACKEND.includes(userEmail)) {
         console.log(`Fetching all tasks for admin user: ${userEmail}`);
+        // No WHERE clause needed for admins, query remains 'SELECT * FROM ...'
     } else {
         console.log(`Fetching all tasks (no user email provided or default behavior)`);
+        // If no user email is provided, it will fetch all tasks (unfiltered)
     }
 
     try {
