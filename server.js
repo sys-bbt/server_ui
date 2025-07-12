@@ -245,17 +245,21 @@ app.post('/api/post', async (req, res) => {
     const { mainTask, perKeyPerDayRows } = req.body;
 
     // Convert timestamps to BigQuery compatible format for mainTask
-    const formatTimestamp = (timestamp) => {
+    const formatTimestamp = (timestamp, type) => {
         if (!timestamp) return null;
         const momentObj = moment.utc(timestamp);
-        // For TIMESTAMP type, format with full precision and timezone (UTC)
-        return momentObj.isValid() ? momentObj.format('YYYY-MM-DD HH:mm:ss.SSSSSS') + ' UTC' : null;
+        if (type === 'TIMESTAMP') {
+            return momentObj.isValid() ? momentObj.format('YYYY-MM-DD HH:mm:ss.SSSSSS') + ' UTC' : null;
+        } else if (type === 'DATETIME') {
+            return momentObj.isValid() ? momentObj.format('YYYY-MM-DD HH:mm:ss.SSSSSS') : null;
+        }
+        return null; // Default or error case
     };
 
-    const formattedPlannedStartTimestamp = formatTimestamp(mainTask.Planned_Start_Timestamp);
-    const formattedPlannedDeliveryTimestamp = formatTimestamp(mainTask.Planned_Delivery_Timestamp);
-    const formattedCreatedAt = formatTimestamp(mainTask.Created_at);
-    const formattedUpdatedAt = formatTimestamp(mainTask.Updated_at);
+    const formattedPlannedStartTimestamp = formatTimestamp(mainTask.Planned_Start_Timestamp, 'TIMESTAMP');
+    const formattedPlannedDeliveryTimestamp = formatTimestamp(mainTask.Planned_Delivery_Timestamp, 'TIMESTAMP');
+    const formattedCreatedAt = formatTimestamp(mainTask.Created_at, 'TIMESTAMP');
+    const formattedUpdatedAt = formatTimestamp(mainTask.Updated_at, 'DATETIME');
 
 
     // Prepare data for the main task table update
@@ -285,10 +289,10 @@ app.post('/api/post', async (req, res) => {
 
     // Define types for nullable parameters in mainTaskRow
     const mainTaskParameterTypes = {
-        Planned_Start_Timestamp: 'TIMESTAMP', // Changed back to TIMESTAMP
-        Planned_Delivery_Timestamp: 'TIMESTAMP', // Changed back to TIMESTAMP
-        Created_at: 'TIMESTAMP', // Changed back to TIMESTAMP
-        Updated_at: 'TIMESTAMP', // Changed back to TIMESTAMP
+        Planned_Start_Timestamp: 'TIMESTAMP',
+        Planned_Delivery_Timestamp: 'TIMESTAMP',
+        Created_at: 'TIMESTAMP',
+        Updated_at: 'DATETIME', // Corrected to DATETIME
         Emails: 'STRING',
         Responsibility: 'STRING',
         Client: 'STRING',
