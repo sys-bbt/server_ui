@@ -38,6 +38,7 @@ const bigQueryClient = new BigQuery({
 
 // Define admin emails on the backend for consistency and security
 const ADMIN_EMAILS_BACKEND = [
+    "systems@brightbraintech.com",
     "neelam.p@brightbraintech.com",
     "meghna.j@brightbraintech.com",
     "zoya.a@brightbraintech.com",
