@@ -165,10 +165,9 @@ app.get('/api/per-key-per-day-by-key', async (req, res) => {
         FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\`
         WHERE Key = @key
     `;
-    const params = { key: parseInt(key, 10) }; // Convert key to INT64 for comparison
-    // Define types for parameters, especially if they can be null or need explicit casting
+    const params = { key: key }; // Key is STRING, no parseInt
     const queryTypes = {
-        key: 'INT64' // Explicitly define key as INT64
+        key: 'STRING' // Explicitly define key as STRING
     };
 
     try {
@@ -179,8 +178,6 @@ app.get('/api/per-key-per-day-by-key', async (req, res) => {
             location: 'US', // Specify your BigQuery dataset location
         });
 
-        // Return the data in a structure similar to how per-key-per-day was grouped
-        // This makes it easier for the frontend to consume
         const groupedData = {
             totalDuration: 0,
             entries: []
@@ -292,7 +289,7 @@ app.post('/api/post', async (req, res) => {
         Planned_Start_Timestamp: 'TIMESTAMP',
         Planned_Delivery_Timestamp: 'TIMESTAMP',
         Created_at: 'TIMESTAMP',
-        Updated_at: 'DATETIME', // Corrected to DATETIME
+        Updated_at: 'DATETIME',
         Emails: 'STRING',
         Responsibility: 'STRING',
         Client: 'STRING',
@@ -304,9 +301,9 @@ app.post('/api/post', async (req, res) => {
 
     // Define schema for Per_Key_Per_Day table inserts
     const perKeyPerDaySchema = [
-        { name: 'Key', type: 'STRING' }, // Keep as STRING here, will cast in query if needed
+        { name: 'Key', type: 'STRING' }, // Key is STRING
         { name: 'Day', type: 'DATE' },
-        { name: 'Duration', type: 'INTEGER' }, // Storing minutes as INTEGER
+        { name: 'Duration', type: 'FLOAT' }, // Changed to FLOAT
         { name: 'Duration_Unit', type: 'STRING' },
         { name: 'Planned_Delivery_Slot', type: 'STRING', mode: 'NULLABLE' },
         { name: 'Responsibility', type: 'STRING' },
@@ -356,8 +353,8 @@ app.post('/api/post', async (req, res) => {
         `;
         const deletePerKeyOptions = {
             query: deletePerKeyQuery,
-            params: { Key: parseInt(mainTask.Key, 10) }, // Convert Key to INT64 for deletion
-            types: { Key: 'INT64' }, // Explicitly define type for Key as INT64
+            params: { Key: mainTask.Key }, // Key is STRING, no parseInt
+            types: { Key: 'STRING' }, // Explicitly define type for Key as STRING
             location: 'US',
         };
         const [deleteJob] = await bigQueryClient.createQueryJob(deletePerKeyOptions);
@@ -366,10 +363,9 @@ app.post('/api/post', async (req, res) => {
 
         // 3. Insert new Per_Key_Per_Day entries
         if (perKeyPerDayRows && perKeyPerDayRows.length > 0) {
-            // BigQuery insert expects an array of objects
             const insertRows = perKeyPerDayRows.map(row => ({
                 Key: row.Key,
-                Day: row.Day, // Should be 'YYYY-MM-DD'
+                Day: row.Day,
                 Duration: row.Duration, // This is now in minutes from frontend
                 Duration_Unit: row.Duration_Unit, // This is now 'Minutes' from frontend
                 Planned_Delivery_Slot: row.Planned_Delivery_Slot,
