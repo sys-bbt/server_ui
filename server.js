@@ -38,7 +38,6 @@ const bigQueryClient = new BigQuery({
 
 // Define admin emails on the backend for consistency and security
 const ADMIN_EMAILS_BACKEND = [
-    "systems@brightbraintech.com",
     "neelam.p@brightbraintech.com",
     "meghna.j@brightbraintech.com",
     "zoya.a@brightbraintech.com",
@@ -76,37 +75,46 @@ app.get('/api/people-mapping', async (req, res) => {
 // Modified /api/data route (GET workflow headers only, with filtering for non-admins)
 app.get('/api/data', async (req, res) => {
     const userEmail = req.query.email; // Get email from query parameter
+    const searchQuery = req.query.searchQuery; // Get search query from parameter
+    const clientFilter = req.query.clientFilter; // Get client filter from parameter
+
     let query;
     let params = {};
+    let whereClauses = [`Step_ID = 0`]; // Always filter for workflow headers
 
-    // Base query for workflow headers
-    let baseQuery = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\` WHERE Step_ID = 0`;
-
-    // Check if userEmail is provided and if it's NOT an admin email
+    // Add user-specific filtering for non-admins
     if (userEmail && !ADMIN_EMAILS_BACKEND.includes(userEmail)) {
-        // Non-admin user: Fetch only workflow headers (Step_ID = 0)
-        // where any task within that workflow is assigned to them or 'System'
-        query = `
-            ${baseQuery}
-            AND DelCode_w_o__ IN (
-                SELECT DISTINCT DelCode_w_o__
-                FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
-                WHERE Emails LIKE @userEmail OR Emails LIKE @systemEmail
-            )`;
-        params = {
-            userEmail: `%${userEmail}%`,
-            systemEmail: `%${SYSTEM_EMAIL_FOR_GLOBAL_TASKS}%`
-        };
+        whereClauses.push(`DelCode_w_o__ IN (
+            SELECT DISTINCT DelCode_w_o__
+            FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
+            WHERE Emails LIKE @userEmail OR Emails LIKE @systemEmail
+        )`);
+        params.userEmail = `%${userEmail}%`;
+        params.systemEmail = `%${SYSTEM_EMAIL_FOR_GLOBAL_TASKS}%`;
         console.log(`Filtering workflow headers for non-admin user: ${userEmail}`);
+    } else if (userEmail && ADMIN_EMAILS_BACKEND.includes(userEmail)) {
+        console.log(`Fetching all workflow headers for admin user: ${userEmail}`);
     } else {
-        // Admin user or no user email provided: Fetch all workflow headers
-        query = baseQuery;
-        if (userEmail && ADMIN_EMAILS_BACKEND.includes(userEmail)) {
-            console.log(`Fetching all workflow headers for admin user: ${userEmail}`);
-        } else {
-            console.log(`Fetching all workflow headers (no user email provided or default behavior)`);
-        }
+        console.log(`Fetching all workflow headers (no user email provided or default behavior)`);
     }
+
+    // Add search query filtering
+    if (searchQuery) {
+        // Search in Task_Details or Delivery_code
+        whereClauses.push(`(Task_Details LIKE @searchQuery OR Delivery_code LIKE @searchQuery)`);
+        params.searchQuery = `%${searchQuery}%`;
+        console.log(`Applying search filter: ${searchQuery}`);
+    }
+
+    // Add client filter
+    if (clientFilter) {
+        whereClauses.push(`Client = @clientFilter`);
+        params.clientFilter = clientFilter;
+        console.log(`Applying client filter: ${clientFilter}`);
+    }
+
+    query = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
+             WHERE ${whereClauses.join(' AND ')}`;
 
     try {
         const [rows] = await bigQueryClient.query({
