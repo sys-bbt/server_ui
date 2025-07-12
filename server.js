@@ -244,6 +244,7 @@ app.post('/api/post', async (req, res) => {
         if (!timestamp) return null;
         // The timestamp from frontend is already ISO string, no need to replace ' UTC'
         const momentObj = moment.utc(timestamp);
+        // For DATETIME type, format without timezone info
         return momentObj.isValid() ? momentObj.format('YYYY-MM-DD HH:mm:ss.SSSSSS') : null;
     };
 
@@ -281,10 +282,10 @@ app.post('/api/post', async (req, res) => {
 
     // Define types for nullable parameters in mainTaskRow
     const mainTaskParameterTypes = {
-        Planned_Start_Timestamp: 'TIMESTAMP',
-        Planned_Delivery_Timestamp: 'TIMESTAMP',
-        Created_at: 'TIMESTAMP',
-        Updated_at: 'TIMESTAMP',
+        Planned_Start_Timestamp: 'DATETIME', // Changed to DATETIME
+        Planned_Delivery_Timestamp: 'DATETIME', // Changed to DATETIME
+        Created_at: 'DATETIME', // Changed to DATETIME
+        Updated_at: 'DATETIME', // Changed to DATETIME
         Emails: 'STRING',
         Responsibility: 'STRING',
         Client: 'STRING',
