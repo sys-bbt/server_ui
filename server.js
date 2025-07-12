@@ -72,30 +72,34 @@ app.get('/api/people-mapping', async (req, res) => {
 // Modified /api/data route (GET all tasks with filtering for non-admins)
 app.get('/api/data', async (req, res) => {
     const userEmail = req.query.email; // Get email from query parameter
-    let query = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\``;
+    let query;
     let params = {};
 
     // Check if userEmail is provided and if it's NOT an admin email
     if (userEmail && !ADMIN_EMAILS_BACKEND.includes(userEmail)) {
-        // Non-admin user: show tasks assigned to them OR tasks assigned to 'System'
-        // OR any task belonging to a workflow where they or system are assigned.
-        query += ` WHERE (Emails LIKE @userEmail OR Emails LIKE @systemEmail)
-                OR DelCode_w_o__ IN (
-                    SELECT DelCode_w_o__
-                    FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
-                    WHERE Emails LIKE @userEmail OR Emails LIKE @systemEmail
-                )`;
+        // Non-admin user: Fetch all DelCode_w_o__ that have any task assigned to them or 'System'
+        // Then, select all tasks belonging to those DelCode_w_o__
+        query = `
+            SELECT *
+            FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
+            WHERE DelCode_w_o__ IN (
+                SELECT DISTINCT DelCode_w_o__
+                FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
+                WHERE Emails LIKE @userEmail OR Emails LIKE @systemEmail
+            )`;
         params = {
             userEmail: `%${userEmail}%`,
             systemEmail: `%${SYSTEM_EMAIL_FOR_GLOBAL_TASKS}%`
         };
-        console.log(`Filtering tasks for non-admin user: ${userEmail} (including System tasks and associated workflows)`);
-    } else if (userEmail && ADMIN_EMAILS_BACKEND.includes(userEmail)) {
-        console.log(`Fetching all tasks for admin user: ${userEmail}`);
-        // No WHERE clause needed for admins, query remains 'SELECT * FROM ...'
+        console.log(`Filtering tasks for non-admin user: ${userEmail} (fetching all tasks within relevant workflows)`);
     } else {
-        console.log(`Fetching all tasks (no user email provided or default behavior)`);
-        // If no user email is provided, it will fetch all tasks (unfiltered)
+        // Admin user or no user email provided: Fetch all tasks
+        query = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\``;
+        if (userEmail && ADMIN_EMAILS_BACKEND.includes(userEmail)) {
+            console.log(`Fetching all tasks for admin user: ${userEmail}`);
+        } else {
+            console.log(`Fetching all tasks (no user email provided or default behavior)`);
+        }
     }
 
     try {
@@ -142,7 +146,8 @@ app.get('/api/per-person-per-day', async (req, res) => {
     try {
         const [rows] = await bigQueryClient.query(query);
         res.status(200).json(rows);
-    } catch (error) {
+    }
+    catch (error) {
         console.error('Error fetching per-person-per-day data from BigQuery:', error);
         res.status(500).send({ error: 'Failed to fetch per-person-per-day data from BigQuery.' });
     }
