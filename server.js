@@ -267,7 +267,7 @@ app.post('/api/post', async (req, res) => {
         Planned_Delivery_Timestamp: formattedPlannedDeliveryTimestamp,
         Responsibility: mainTask.Responsibility,
         Current_Status: mainTask.Current_Status,
-        Email: mainTask.Email,
+        // Removed 'Email' here as it's not in your BigQuery schema
         Emails: mainTask.Emails,
         Total_Tasks: mainTask.Total_Tasks,
         Completed_Tasks: mainTask.Completed_Tasks,
@@ -285,7 +285,7 @@ app.post('/api/post', async (req, res) => {
         Planned_Delivery_Timestamp: 'TIMESTAMP',
         Created_at: 'TIMESTAMP',
         Updated_at: 'TIMESTAMP',
-        Email: 'STRING', // Assuming Email can be null/empty string
+        // Removed 'Email' type definition as it's not in your BigQuery schema
         Emails: 'STRING', // Assuming Emails can be null/empty string
         Responsibility: 'STRING', // Assuming Responsibility can be null/empty string
         Client: 'STRING',
@@ -312,7 +312,7 @@ app.post('/api/post', async (req, res) => {
                 Planned_Delivery_Timestamp = @Planned_Delivery_Timestamp,
                 Responsibility = @Responsibility,
                 Current_Status = @Current_Status,
-                Email = @Email,
+                -- Removed 'Email = @Email,' from here
                 Emails = @Emails,
                 Total_Tasks = @Total_Tasks,
                 Completed_Tasks = @Completed_Tasks,
@@ -327,7 +327,7 @@ app.post('/api/post', async (req, res) => {
         const updateMainTaskOptions = {
             query: updateMainTaskQuery,
             params: mainTaskRow,
-            types: mainTaskParameterTypes, // <--- ADDED THIS LINE
+            types: mainTaskParameterTypes,
             location: 'US',
         };
         const [mainTaskJob] = await bigQueryClient.createQueryJob(updateMainTaskOptions);
