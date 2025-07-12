@@ -285,16 +285,25 @@ app.post('/api/post', async (req, res) => {
         Planned_Delivery_Timestamp: 'TIMESTAMP',
         Created_at: 'TIMESTAMP',
         Updated_at: 'TIMESTAMP',
-        // Removed 'Email' type definition as it's not in your BigQuery schema
-        Emails: 'STRING', // Assuming Emails can be null/empty string
-        Responsibility: 'STRING', // Assuming Responsibility can be null/empty string
+        Emails: 'STRING',
+        Responsibility: 'STRING',
         Client: 'STRING',
         Short_Description: 'STRING',
         Frequency___Timeline: 'STRING',
         Time_Left_For_Next_Task_dd_hh_mm_ss: 'STRING',
         Card_Corner_Status: 'STRING',
-        // Add other fields that might be null and their types
     };
+
+    // Define schema for Per_Key_Per_Day table inserts
+    // Assuming 'Duration' stores minutes as INTEGER, 'Day' as DATE, 'Planned_Delivery_Slot' is NULLABLE STRING
+    const perKeyPerDaySchema = [
+        { name: 'Key', type: 'STRING' },
+        { name: 'Day', type: 'DATE' },
+        { name: 'Duration', type: 'INTEGER' },
+        { name: 'Duration_Unit', type: 'STRING' },
+        { name: 'Planned_Delivery_Slot', type: 'STRING', mode: 'NULLABLE' },
+        { name: 'Responsibility', type: 'STRING' },
+    ];
 
     try {
         // 1. Update the main task table
@@ -312,7 +321,6 @@ app.post('/api/post', async (req, res) => {
                 Planned_Delivery_Timestamp = @Planned_Delivery_Timestamp,
                 Responsibility = @Responsibility,
                 Current_Status = @Current_Status,
-                -- Removed 'Email = @Email,' from here
                 Emails = @Emails,
                 Total_Tasks = @Total_Tasks,
                 Completed_Tasks = @Completed_Tasks,
@@ -342,7 +350,7 @@ app.post('/api/post', async (req, res) => {
         const deletePerKeyOptions = {
             query: deletePerKeyQuery,
             params: { Key: mainTask.Key }, // Use mainTask.Key for deletion
-            types: { Key: 'STRING' }, // Explicitly define type for Key if it can be null/undefined in params
+            types: { Key: 'STRING' },
             location: 'US',
         };
         const [deleteJob] = await bigQueryClient.createQueryJob(deletePerKeyOptions);
@@ -355,8 +363,8 @@ app.post('/api/post', async (req, res) => {
             const insertRows = perKeyPerDayRows.map(row => ({
                 Key: row.Key,
                 Day: row.Day, // Should be 'YYYY-MM-DD'
-                Duration: row.Duration,
-                Duration_Unit: row.Duration_Unit,
+                Duration: row.Duration, // This is now in minutes from frontend
+                Duration_Unit: row.Duration_Unit, // This is now 'Minutes' from frontend
                 Planned_Delivery_Slot: row.Planned_Delivery_Slot,
                 Responsibility: row.Responsibility,
             }));
@@ -364,7 +372,7 @@ app.post('/api/post', async (req, res) => {
             await bigQueryClient
                 .dataset(bigQueryDataset)
                 .table(bigQueryTable2)
-                .insert(insertRows);
+                .insert(insertRows, { schema: perKeyPerDaySchema }); // ADDED SCHEMA HERE
             console.log(`New Per_Key_Per_Day entries for Key ${mainTask.Key} inserted successfully.`);
         }
 
