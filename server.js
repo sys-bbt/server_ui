@@ -16,7 +16,26 @@ const bigQueryTable3 = "Per_Person_Per_Day";
 const app = express();
 
 // Middleware setup
-app.use(cors());
+// Configure CORS to allow requests from your Vercel frontend
+const allowedOrigins = [
+    'http://localhost:3000', // For local development
+    'https://scheduler-ui-rvpan.vercel.app' // Your Vercel frontend URL
+];
+
+app.use(cors({
+    origin: function (origin, callback) {
+        // Allow requests with no origin (like mobile apps or curl requests)
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.indexOf(origin) === -1) {
+            const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+            return callback(new Error(msg), false);
+        }
+        return callback(null, true);
+    },
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // Allow necessary methods
+    allowedHeaders: ['Content-Type', 'Authorization'], // Allow necessary headers
+    credentials: true // Allow cookies to be sent
+}));
 app.use(express.json());
 
 console.log('DEBUG: GOOGLE_PROJECT_ID:', process.env.GOOGLE_PROJECT_ID);
@@ -165,9 +184,9 @@ app.get('/api/per-key-per-day-by-key', async (req, res) => {
         FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\`
         WHERE Key = @key
     `;
-    const params = { key: key }; // Key is STRING, no parseInt
+    const params = { key: parseInt(key, 10) }; // Convert key to INT64 for comparison
     const queryTypes = {
-        key: 'STRING' // Explicitly define key as STRING
+        key: 'INT64' // Explicitly define key as INT64 based on schema
     };
 
     try {
@@ -301,9 +320,9 @@ app.post('/api/post', async (req, res) => {
 
     // Define schema for Per_Key_Per_Day table inserts
     const perKeyPerDaySchema = [
-        { name: 'Key', type: 'STRING' }, // Key is STRING
+        { name: 'Key', type: 'INTEGER' }, // Corrected to INTEGER
         { name: 'Day', type: 'DATE' },
-        { name: 'Duration', type: 'FLOAT' }, // Changed to FLOAT
+        { name: 'Duration', type: 'INTEGER' }, // Corrected to INTEGER
         { name: 'Duration_Unit', type: 'STRING' },
         { name: 'Planned_Delivery_Slot', type: 'STRING', mode: 'NULLABLE' },
         { name: 'Responsibility', type: 'STRING' },
@@ -353,8 +372,8 @@ app.post('/api/post', async (req, res) => {
         `;
         const deletePerKeyOptions = {
             query: deletePerKeyQuery,
-            params: { Key: mainTask.Key }, // Key is STRING, no parseInt
-            types: { Key: 'STRING' }, // Explicitly define type for Key as STRING
+            params: { Key: parseInt(mainTask.Key, 10) }, // Convert Key to INT64 for deletion
+            types: { Key: 'INT64' }, // Explicitly define type for Key as INT64
             location: 'US',
         };
         const [deleteJob] = await bigQueryClient.createQueryJob(deletePerKeyOptions);
@@ -364,7 +383,7 @@ app.post('/api/post', async (req, res) => {
         // 3. Insert new Per_Key_Per_Day entries
         if (perKeyPerDayRows && perKeyPerDayRows.length > 0) {
             const insertRows = perKeyPerDayRows.map(row => ({
-                Key: row.Key,
+                Key: parseInt(row.Key, 10), // Convert Key to INTEGER for insertion
                 Day: row.Day,
                 Duration: row.Duration, // This is now in minutes from frontend
                 Duration_Unit: row.Duration_Unit, // This is now 'Minutes' from frontend
