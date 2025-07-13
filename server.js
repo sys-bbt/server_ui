@@ -32,7 +32,7 @@ app.use(cors({
         }
         return callback(null, true);
     },
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // Allow necessary methods
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // Explicitly include OPTIONS
     allowedHeaders: ['Content-Type', 'Authorization'], // Allow necessary headers
     credentials: true // Allow cookies to be sent
 }));
