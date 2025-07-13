@@ -322,8 +322,8 @@ app.post('/api/post', async (req, res) => {
         Planned_Delivery_Timestamp: formattedPlannedDeliveryTimestamp,
         Responsibility: mainTask.Responsibility,
         Current_Status: mainTask.Current_Status,
-        Email: mainTask.Email,
-        Emails: mainTask.Emails,
+        // Removed 'Email' here as it's not a column in BigQuery table
+        Emails: mainTask.Emails, 
         Total_Tasks: mainTask.Total_Tasks,
         Completed_Tasks: mainTask.Completed_Tasks,
         Planned_Tasks: mainTask.Planned_Tasks,
@@ -348,7 +348,7 @@ app.post('/api/post', async (req, res) => {
         Planned_Delivery_Timestamp: 'TIMESTAMP',
         Responsibility: 'STRING',
         Current_Status: 'STRING',
-        Email: 'STRING',
+        // Removed 'Email' type definition
         Emails: 'STRING',
         Total_Tasks: 'INTEGER',
         Completed_Tasks: 'INTEGER',
@@ -386,7 +386,6 @@ app.post('/api/post', async (req, res) => {
                 Planned_Delivery_Timestamp = @Planned_Delivery_Timestamp,
                 Responsibility = @Responsibility,
                 Current_Status = @Current_Status,
-                Email = @Email,
                 Emails = @Emails,
                 Total_Tasks = @Total_Tasks,
                 Completed_Tasks = @Completed_Tasks,
