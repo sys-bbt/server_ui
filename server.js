@@ -19,7 +19,7 @@ const app = express();
 // Configure CORS to allow requests from your Vercel frontend
 const allowedOrigins = [
     'http://localhost:3000', // For local development
-    'https://scheduler-ui-rvpan.vercel.app' // Your Vercel frontend URL
+    'https://scheduler-ui-roan.vercel.app' // Your Vercel frontend URL
 ];
 
 app.use(cors({
