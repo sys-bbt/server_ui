@@ -18,9 +18,9 @@ const app = express();
 // Middleware setup
 // Configure CORS to allow requests from your Vercel frontend
 const allowedOrigins = [
-    'http://localhost:3001', // For local development
+    'http://localhost:3000', // For local development
     /^https:\/\/.*\.vercel\.app$/, // Regex to match any subdomain of vercel.app with HTTPS
-    'https://scheduler-ui-roan.vercel.app' // Explicitly keep your main Vercel URL
+    'https://scheduler-ui-rvpan.vercel.app' // Explicitly keep your main Vercel URL
 ];
 
 app.use(cors({
@@ -450,6 +450,17 @@ app.post('/api/post', async (req, res) => {
                 Planned_Delivery_Slot: row.Planned_Delivery_Slot,
                 Responsibility: row.Responsibility,
             }));
+
+            // Log the type of each column for each row before insertion
+            console.log('Logging data types for Per_Key_Per_Day rows before insertion:');
+            insertRows.forEach((row, index) => {
+                console.log(`Row ${index}:`);
+                for (const key in row) {
+                    if (Object.hasOwnProperty.call(row, key)) {
+                        console.log(`  ${key}: Value = ${row[key]}, Type = ${typeof row[key]}`);
+                    }
+                }
+            });
 
             await bigQueryClient
                 .dataset(bigQueryDataset)
