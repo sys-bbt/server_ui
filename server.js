@@ -18,15 +18,27 @@ const app = express();
 // Middleware setup
 // Configure CORS to allow requests from your Vercel frontend
 const allowedOrigins = [
-    'http://localhost:3000', // For local development
-    'https://scheduler-ui-roan.vercel.app' // Your Vercel frontend URL
+    'http://localhost:3001', // For local development
+    /^https:\/\/.*\.vercel\.app$/, // Regex to match any subdomain of vercel.app with HTTPS
+    'https://scheduler-ui-roan.vercel.app' // Explicitly keep your main Vercel URL
 ];
 
 app.use(cors({
     origin: function (origin, callback) {
         // Allow requests with no origin (like mobile apps or curl requests)
         if (!origin) return callback(null, true);
-        if (allowedOrigins.indexOf(origin) === -1) {
+
+        // Check if the origin is in the allowedOrigins array or matches a regex
+        const isAllowed = allowedOrigins.some(allowedOrigin => {
+            if (typeof allowedOrigin === 'string') {
+                return allowedOrigin === origin;
+            } else if (allowedOrigin instanceof RegExp) {
+                return allowedOrigin.test(origin);
+            }
+            return false;
+        });
+
+        if (!isAllowed) {
             const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
             return callback(new Error(msg), false);
         }
