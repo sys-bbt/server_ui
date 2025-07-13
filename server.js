@@ -423,6 +423,8 @@ app.post('/api/post', async (req, res) => {
         // End of commented out section for main task table update
 
         // 2. Delete existing Per_Key_Per_Day entries for this Key
+        // This section is commented out as per user's request to not delete existing entries.
+        /*
         const deletePerKeyQuery = `
             DELETE FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\`
             WHERE Key = @Key
@@ -436,6 +438,7 @@ app.post('/api/post', async (req, res) => {
         const [deleteJob] = await bigQueryClient.createQueryJob(deletePerKeyOptions);
         await deleteJob.getQueryResults();
         console.log(`Existing Per_Key_Per_Day entries for Key ${mainTask.Key} deleted.`);
+        */
 
         // 3. Insert new Per_Key_Per_Day entries
         if (perKeyPerDayRows && perKeyPerDayRows.length > 0) {
