@@ -18,9 +18,9 @@ const app = express();
 // Middleware setup
 // Configure CORS to allow requests from your Vercel frontend
 const allowedOrigins = [
-    'http://localhost:3001', // For local development
+    'http://localhost:3000', // For local development
     /^https:\/\/.*\.vercel\.app$/, // Regex to match any subdomain of vercel.app with HTTPS
-    'https://scheduler-ui-roan.vercel.app' // Explicitly keep your main Vercel URL
+    'https://scheduler-ui-rvpan.vercel.app' // Explicitly keep your main Vercel URL
 ];
 
 app.use(cors({
@@ -48,7 +48,7 @@ app.use(cors({
     allowedHeaders: ['Content-Type', 'Authorization'], // Allow necessary headers
     credentials: true // Allow cookies to be sent
 }));
-app.use(express.json());
+app.use(express.json()); // This middleware parses JSON request bodies
 
 console.log('DEBUG: GOOGLE_PROJECT_ID:', process.env.GOOGLE_PROJECT_ID);
 console.log('DEBUG: BIGQUERY_CLIENT_EMAIL:', process.env.BIGQUERY_CLIENT_EMAIL);
@@ -270,7 +270,20 @@ app.get('/api/per-person-per-day', async (req, res) => {
 
 // Modified POST route to handle both main task and Per_Key_Per_Day updates
 app.post('/api/post', async (req, res) => {
+    console.log('Received request body:', JSON.stringify(req.body, null, 2)); // Log the entire request body
     const { mainTask, perKeyPerDayRows } = req.body;
+
+    console.log('mainTask after destructuring:', mainTask); // Log mainTask
+    console.log('perKeyPerDayRows after destructuring:', perKeyPerDayRows); // Log perKeyPerDayRows
+
+    // Check if mainTask is undefined before proceeding
+    if (!mainTask) {
+        console.error("mainTask is undefined in the request body.");
+        return res.status(400).json({
+            message: 'Bad Request: mainTask object is missing in the request body.',
+            details: 'The server expected a "mainTask" object but received undefined.'
+        });
+    }
 
     // Convert timestamps to BigQuery compatible format for mainTask
     const formatTimestamp = (timestamp, type) => {
