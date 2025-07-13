@@ -443,12 +443,12 @@ app.post('/api/post', async (req, res) => {
         // 3. Insert new Per_Key_Per_Day entries
         if (perKeyPerDayRows && perKeyPerDayRows.length > 0) {
             const insertRows = perKeyPerDayRows.map(row => ({
-                Key: parseInt(mainTask.Key, 10), // FIX: Use mainTask.Key here, as it's the correct top-level Key
-                Day: row.Day, // Use directly, frontend should send YYYY-MM-DD or null
-                Duration: parseInt(row.Duration, 10), // Use directly, frontend should send number or 0
-                Duration_Unit: row.Duration_Unit, // Use directly, frontend should send "min"
-                Planned_Delivery_Slot: row.Planned_Delivery_Slot, // Use directly
-                Responsibility: row.Responsibility, // Use directly, frontend should send personResponsible
+                Key: parseInt(mainTask.Key, 10), // Use mainTask.Key for the Key column
+                Day: row.day, // Corrected: Use row.day (lowercase)
+                Duration: parseInt(row.duration, 10), // Corrected: Use row.duration (lowercase)
+                Duration_Unit: "min", // Corrected: Explicitly set to "min" as requested
+                Planned_Delivery_Slot: row.slot || null, // Corrected: Use row.slot (lowercase), default to null
+                Responsibility: row.personResponsible, // Corrected: Use row.personResponsible (camelCase)
             }));
 
             // Log the type of each column for each row before insertion
