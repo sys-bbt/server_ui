@@ -443,12 +443,12 @@ app.post('/api/post', async (req, res) => {
         // 3. Insert new Per_Key_Per_Day entries
         if (perKeyPerDayRows && perKeyPerDayRows.length > 0) {
             const insertRows = perKeyPerDayRows.map(row => ({
-                Key: parseInt(row.Key, 10), // Convert Key to INTEGER for insertion
-                Day: row.Day,
-                Duration: row.Duration, // This is now in minutes from frontend
-                Duration_Unit: row.Duration_Unit, // This is now 'Minutes' from frontend
-                Planned_Delivery_Slot: row.Planned_Delivery_Slot,
-                Responsibility: row.Responsibility,
+                Key: parseInt(mainTask.Key, 10), // FIX: Use mainTask.Key here, as it's the correct top-level Key
+                Day: row.Day || null, // Default to null if undefined
+                Duration: parseInt(row.Duration, 10) || 0, // Ensure it's an integer, default to 0
+                Duration_Unit: row.Duration_Unit || "Minutes", // Default if somehow missing
+                Planned_Delivery_Slot: row.Planned_Delivery_Slot || null, // Default to null
+                Responsibility: row.Responsibility || "Unassigned", // Default if missing
             }));
 
             // Log the type of each column for each row before insertion
