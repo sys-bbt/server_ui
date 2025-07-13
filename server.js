@@ -9,7 +9,7 @@ dotenv.config();
 
 const projectId = process.env.GOOGLE_PROJECT_ID;
 const bigQueryDataset = process.env.BIGQUERY_DATASET;
-const bigQueryTable = process.env.BIGQUERY_TABLE; // Your main task table
+const bigQueryTable = process.env.BIGQUERY_TABLE; // Your main task table (e.g., componentv2)
 const bigQueryTable2 = "Per_Key_Per_Day"; // Per_Key_Per_Day table
 const bigQueryTable3 = "Per_Person_Per_Day";
 
@@ -225,7 +225,6 @@ app.get('/api/per-key-per-day-by-key', async (req, res) => {
         res.status(200).json(groupedData);
     } catch (error) {
         console.error(`Error fetching Per_Key_Per_Day data for Key ${key} from BigQuery:`, error);
-        // Corrected: Removed the extra backtick here
         res.status(500).send({ error: `Failed to fetch Per_Key_Per_Day data for Key ${key}.` });
     }
 });
@@ -383,7 +382,9 @@ app.post('/api/post', async (req, res) => {
     ];
 
     try {
-        // 1. Update the main task table
+        // 1. Update the main task table (componentv2)
+        // This section is commented out as per user's request to only update Per_Key_Per_Day.
+        /*
         const updateMainTaskQuery = `
             UPDATE \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
             SET
@@ -418,6 +419,8 @@ app.post('/api/post', async (req, res) => {
         const [mainTaskJob] = await bigQueryClient.createQueryJob(updateMainTaskOptions);
         await mainTaskJob.getQueryResults();
         console.log(`Main task with Key ${mainTask.Key} updated successfully.`);
+        */
+        // End of commented out section for main task table update
 
         // 2. Delete existing Per_Key_Per_Day entries for this Key
         const deletePerKeyQuery = `
