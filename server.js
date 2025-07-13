@@ -225,7 +225,7 @@ app.get('/api/per-key-per-day-by-key', async (req, res) => {
         res.status(200).json(groupedData);
     } catch (error) {
         console.error(`Error fetching Per_Key_Per_Day data for Key ${key} from BigQuery:`, error);
-        res.status(500).send({ error: `Failed to fetch Per_Key_Per_Day data for Key ${key}.` });
+        res.status(500).send({ error: `Failed to fetch Per_Key_Per_Day data for Key ${key}.` `);
     }
 });
 
@@ -363,6 +363,12 @@ app.post('/api/post', async (req, res) => {
         Frequency___Timeline: 'STRING',
         Time_Left_For_Next_Task_dd_hh_mm_ss: 'STRING',
         Card_Corner_Status: 'STRING',
+        // Add all other fields that can be null and are part of mainTaskRow
+        // Explicitly define types for all fields that might be null
+        Total_Tasks: 'INTEGER', // Assuming these are integers
+        Completed_Tasks: 'INTEGER',
+        Planned_Tasks: 'INTEGER',
+        Percent_Tasks_Completed: 'FLOAT', // Assuming this is a float/numeric
     };
 
     // Define schema for Per_Key_Per_Day table inserts
@@ -405,7 +411,7 @@ app.post('/api/post', async (req, res) => {
         const updateMainTaskOptions = {
             query: updateMainTaskQuery,
             params: mainTaskRow,
-            types: mainTaskParameterTypes,
+            types: mainTaskParameterTypes, // <--- IMPORTANT: Pass the types here
             location: 'US',
         };
         const [mainTaskJob] = await bigQueryClient.createQueryJob(updateMainTaskOptions);
