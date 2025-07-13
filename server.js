@@ -225,7 +225,8 @@ app.get('/api/per-key-per-day-by-key', async (req, res) => {
         res.status(200).json(groupedData);
     } catch (error) {
         console.error(`Error fetching Per_Key_Per_Day data for Key ${key} from BigQuery:`, error);
-        res.status(500).send({ error: `Failed to fetch Per_Key_Per_Day data for Key ${key}.` `);
+        // Corrected: Removed the extra backtick here
+        res.status(500).send({ error: `Failed to fetch Per_Key_Per_Day data for Key ${key}.` });
     }
 });
 
