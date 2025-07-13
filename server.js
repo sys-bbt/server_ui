@@ -270,53 +270,36 @@ app.get('/api/per-person-per-day', async (req, res) => {
 
 // Modified POST route to handle both main task and Per_Key_Per_Day updates
 app.post('/api/post', async (req, res) => {
-    console.log('Received request body:', JSON.stringify(req.body, null, 2)); // Log the entire request body
+    console.log('Backend: Received POST request to /api/post');
+    console.log('Backend: Request body:', JSON.stringify(req.body, null, 2)); // Log the entire request body
 
-    // Destructure directly from req.body as the frontend sends a flat object
-    const {
-        Key, Delivery_code, DelCode_w_o__, Step_ID, Task_Details, Frequency___Timeline,
-        Client, Short_Description, Planned_Start_Timestamp, Planned_Delivery_Timestamp,
-        Responsibility, Current_Status, Email, Emails, Total_Tasks, Completed_Tasks,
-        Planned_Tasks, Percent_Tasks_Completed, Created_at, Updated_at,
-        Time_Left_For_Next_Task_dd_hh_mm_ss, Card_Corner_Status, sliders // 'sliders' array is present
-    } = req.body;
+    // Correctly destructure mainTask and perKeyPerDayRows from req.body
+    const { mainTask, perKeyPerDayRows } = req.body;
 
-    // The 'mainTask' object is implicitly the entire destructured body (excluding sliders for the main table update)
-    const mainTask = {
-        Key, Delivery_code, DelCode_w_o__, Step_ID, Task_Details, Frequency___Timeline,
-        Client, Short_Description, Planned_Start_Timestamp, Planned_Delivery_Timestamp,
-        Responsibility, Current_Status, Email, Emails, Total_Tasks, Completed_Tasks,
-        Planned_Tasks, Percent_Tasks_Completed, Created_at, Updated_at,
-        Time_Left_For_Next_Task_dd_hh_mm_ss, Card_Corner_Status
-    };
+    console.log('Backend: mainTask (destructured):', JSON.stringify(mainTask, null, 2));
+    console.log('Backend: perKeyPerDayRows (destructured):', JSON.stringify(perKeyPerDayRows, null, 2));
 
-    // 'perKeyPerDayRows' is directly the 'sliders' array
-    const perKeyPerDayRows = sliders;
-
-    console.log('mainTask (constructed):', mainTask); // Log mainTask
-    console.log('perKeyPerDayRows (from sliders):', perKeyPerDayRows); // Log perKeyPerDayRows
-
-    // Check if mainTask.Key is undefined before proceeding (more specific check)
-    if (mainTask.Key === undefined || mainTask.Key === null) {
-        console.error("mainTask.Key is missing in the request body.");
+    // Check if mainTask or its Key is missing
+    if (!mainTask || mainTask.Key === undefined || mainTask.Key === null) {
+        console.error("Backend: mainTask or mainTask.Key is missing in the request body.");
         return res.status(400).json({
-            message: 'Bad Request: Task Key is missing in the request body.',
-            details: 'The server expected a "Key" property for the main task but it was not found.'
+            message: 'Bad Request: Task data or Task Key is missing in the request body.',
+            details: 'The server expected a "mainTask" object with a "Key" property but it was not found or was incomplete.'
         });
     }
 
     // Convert timestamps to BigQuery compatible format for mainTask
     const formatTimestamp = (timestamp, type) => {
         if (!timestamp) return null;
-        // Remove " UTC" suffix if present before parsing
+        // Remove " UTC" suffix if present before parsing, then parse as UTC
         const cleanedTimestamp = typeof timestamp === 'string' ? timestamp.replace(' UTC', '') : timestamp;
-        const momentObj = moment.utc(cleanedTimestamp); // Parse as UTC
+        const momentObj = moment.utc(cleanedTimestamp);
         if (type === 'TIMESTAMP') {
             return momentObj.isValid() ? momentObj.format('YYYY-MM-DD HH:mm:ss.SSSSSS') + ' UTC' : null;
         } else if (type === 'DATETIME') {
             return momentObj.isValid() ? momentObj.format('YYYY-MM-DD HH:mm:ss.SSSSSS') : null;
         }
-        return null; // Default or error case
+        return null;
     };
 
     const formattedPlannedStartTimestamp = formatTimestamp(mainTask.Planned_Start_Timestamp, 'TIMESTAMP');
@@ -339,6 +322,7 @@ app.post('/api/post', async (req, res) => {
         Planned_Delivery_Timestamp: formattedPlannedDeliveryTimestamp,
         Responsibility: mainTask.Responsibility,
         Current_Status: mainTask.Current_Status,
+        Email: mainTask.Email,
         Emails: mainTask.Emails,
         Total_Tasks: mainTask.Total_Tasks,
         Completed_Tasks: mainTask.Completed_Tasks,
@@ -350,32 +334,37 @@ app.post('/api/post', async (req, res) => {
         Card_Corner_Status: mainTask.Card_Corner_Status,
     };
 
-    // Define types for nullable parameters in mainTaskRow
+    // Define types for nullable parameters in mainTaskRow for BigQuery UPDATE
     const mainTaskParameterTypes = {
-        Planned_Start_Timestamp: 'TIMESTAMP',
-        Planned_Delivery_Timestamp: 'TIMESTAMP',
-        Created_at: 'TIMESTAMP',
-        Updated_at: 'DATETIME',
-        Emails: 'STRING',
-        Responsibility: 'STRING',
+        Key: 'INTEGER', // Assuming Key is an INTEGER in BigQuery
+        Delivery_code: 'STRING',
+        DelCode_w_o__: 'STRING',
+        Step_ID: 'INTEGER',
+        Task_Details: 'STRING',
+        Frequency___Timeline: 'STRING',
         Client: 'STRING',
         Short_Description: 'STRING',
-        Frequency___Timeline: 'STRING',
-        Time_Left_For_Next_Task_dd_hh_mm_ss: 'STRING',
-        Card_Corner_Status: 'STRING',
-        // Add all other fields that can be null and are part of mainTaskRow
-        // Explicitly define types for all fields that might be null
-        Total_Tasks: 'INTEGER', // Assuming these are integers
+        Planned_Start_Timestamp: 'TIMESTAMP',
+        Planned_Delivery_Timestamp: 'TIMESTAMP',
+        Responsibility: 'STRING',
+        Current_Status: 'STRING',
+        Email: 'STRING',
+        Emails: 'STRING',
+        Total_Tasks: 'INTEGER',
         Completed_Tasks: 'INTEGER',
         Planned_Tasks: 'INTEGER',
-        Percent_Tasks_Completed: 'FLOAT', // Assuming this is a float/numeric
+        Percent_Tasks_Completed: 'FLOAT',
+        Created_at: 'TIMESTAMP',
+        Updated_at: 'DATETIME',
+        Time_Left_For_Next_Task_dd_hh_mm_ss: 'STRING',
+        Card_Corner_Status: 'STRING',
     };
 
     // Define schema for Per_Key_Per_Day table inserts
     const perKeyPerDaySchema = [
-        { name: 'Key', type: 'INTEGER' }, // Corrected to INTEGER
+        { name: 'Key', type: 'INTEGER' },
         { name: 'Day', type: 'DATE' },
-        { name: 'Duration', type: 'INTEGER' }, // Corrected to INTEGER
+        { name: 'Duration', type: 'INTEGER' },
         { name: 'Duration_Unit', type: 'STRING' },
         { name: 'Planned_Delivery_Slot', type: 'STRING', mode: 'NULLABLE' },
         { name: 'Responsibility', type: 'STRING' },
@@ -383,8 +372,6 @@ app.post('/api/post', async (req, res) => {
 
     try {
         // 1. Update the main task table (componentv2)
-        // This section is commented out as per user's request to only update Per_Key_Per_Day.
-        /*
         const updateMainTaskQuery = `
             UPDATE \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
             SET
@@ -399,6 +386,7 @@ app.post('/api/post', async (req, res) => {
                 Planned_Delivery_Timestamp = @Planned_Delivery_Timestamp,
                 Responsibility = @Responsibility,
                 Current_Status = @Current_Status,
+                Email = @Email,
                 Emails = @Emails,
                 Total_Tasks = @Total_Tasks,
                 Completed_Tasks = @Completed_Tasks,
@@ -413,18 +401,16 @@ app.post('/api/post', async (req, res) => {
         const updateMainTaskOptions = {
             query: updateMainTaskQuery,
             params: mainTaskRow,
-            types: mainTaskParameterTypes, // <--- IMPORTANT: Pass the types here
+            types: mainTaskParameterTypes, // Pass the types here
             location: 'US',
         };
+        console.log('Backend: Executing main task update query with params:', JSON.stringify(mainTaskRow, null, 2));
         const [mainTaskJob] = await bigQueryClient.createQueryJob(updateMainTaskOptions);
         await mainTaskJob.getQueryResults();
-        console.log(`Main task with Key ${mainTask.Key} updated successfully.`);
-        */
-        // End of commented out section for main task table update
+        console.log(`Backend: Main task with Key ${mainTask.Key} updated successfully.`);
+
 
         // 2. Delete existing Per_Key_Per_Day entries for this Key
-        // This section is commented out as per user's request to not delete existing entries.
-        /*
         const deletePerKeyQuery = `
             DELETE FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\`
             WHERE Key = @Key
@@ -435,29 +421,29 @@ app.post('/api/post', async (req, res) => {
             types: { Key: 'INT64' }, // Explicitly define type for Key as INT64
             location: 'US',
         };
+        console.log('Backend: Deleting existing perKeyPerDayRows for Key:', mainTask.Key);
         const [deleteJob] = await bigQueryClient.createQueryJob(deletePerKeyOptions);
         await deleteJob.getQueryResults();
-        console.log(`Existing Per_Key_Per_Day entries for Key ${mainTask.Key} deleted.`);
-        */
+        console.log(`Backend: Existing Per_Key_Per_Day entries for Key ${mainTask.Key} deleted.`);
+
 
         // 3. Insert new Per_Key_Per_Day entries
         if (perKeyPerDayRows && perKeyPerDayRows.length > 0) {
             const insertRows = perKeyPerDayRows.map(row => ({
                 Key: parseInt(mainTask.Key, 10), // Use mainTask.Key for the Key column
-                Day: row.day, // Corrected: Use row.day (lowercase)
-                Duration: parseInt(row.duration, 10), // Corrected: Use row.duration (lowercase)
-                Duration_Unit: "min", // Corrected: Explicitly set to "min" as requested
-                Planned_Delivery_Slot: row.slot || null, // Corrected: Use row.slot (lowercase), default to null
-                Responsibility: row.personResponsible, // Corrected: Use row.personResponsible (camelCase)
+                Day: row.Day, // Use row.Day (capitalized)
+                Duration: parseInt(row.Duration, 10), // Use row.Duration (capitalized)
+                Duration_Unit: row.Duration_Unit, // Use row.Duration_Unit (capitalized)
+                Planned_Delivery_Slot: row.Planned_Delivery_Slot || null, // Use row.Planned_Delivery_Slot (capitalized)
+                Responsibility: row.Responsibility, // Use row.Responsibility (capitalized)
             }));
 
-            // Log the type of each column for each row before insertion
-            console.log('Logging data types for Per_Key_Per_Day rows before insertion:');
+            console.log('Backend: Logging data types for Per_Key_Per_Day rows before insertion:');
             insertRows.forEach((row, index) => {
-                console.log(`Row ${index}:`);
+                console.log(`Backend: Row ${index}:`);
                 for (const key in row) {
                     if (Object.hasOwnProperty.call(row, key)) {
-                        console.log(`  ${key}: Value = ${row[key]}, Type = ${typeof row[key]}`);
+                        console.log(`Backend:   ${key}: Value = ${row[key]}, Type = ${typeof row[key]}`);
                     }
                 }
             });
@@ -466,22 +452,24 @@ app.post('/api/post', async (req, res) => {
                 .dataset(bigQueryDataset)
                 .table(bigQueryTable2)
                 .insert(insertRows, { schema: perKeyPerDaySchema });
-            console.log(`New Per_Key_Per_Day entries for Key ${mainTask.Key} inserted successfully.`);
+            console.log(`Backend: New Per_Key_Per_Day entries for Key ${mainTask.Key} inserted successfully.`);
+        } else {
+            console.log('Backend: No perKeyPerDayRows to insert.');
         }
 
         res.status(200).send({ message: 'Task and associated schedule data updated successfully.' });
 
     } catch (error) {
-        console.error('Error updating task and schedule in BigQuery:', error);
+        console.error('Backend: Error updating task and schedule in BigQuery:', error);
         if (error.response && error.response.insertErrors) {
-            console.error('BigQuery specific insert errors details:');
+            console.error('Backend: BigQuery specific insert errors details:');
             error.response.insertErrors.forEach((insertError, index) => {
-                console.error(`  Row ${index} had errors:`);
-                insertError.errors.forEach(e => console.error(`    - Reason: ${e.reason}, Message: ${e.message}`));
-                console.error('  Raw row that failed:', JSON.stringify(insertError.row, null, 2));
+                console.error(`Backend:   Row ${index} had errors:`);
+                insertError.errors.forEach(e => console.error(`Backend:     - Reason: ${e.reason}, Message: ${e.message}`));
+                console.error('Backend:   Raw row that failed:', JSON.stringify(insertError.row, null, 2));
             });
         } else if (error.code && error.errors) {
-            console.error('Google Cloud API Error:', JSON.stringify(error.errors, null, 2));
+            console.error('Backend: Google Cloud API Error:', JSON.stringify(error.errors, null, 2));
         }
 
         res.status(500).json({
@@ -495,7 +483,7 @@ app.post('/api/post', async (req, res) => {
 // Delete Task from BigQuery
 app.delete('/api/data/:deliveryCode', async (req, res) => {
     const { deliveryCode } = req.params;
-    console.log("hi", req.params)
+    console.log("Backend: Delete request for deliveryCode:", deliveryCode);
     const query = `
         DELETE FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
         WHERE DelCode_w_o__ = @deliveryCode
@@ -511,7 +499,7 @@ app.delete('/api/data/:deliveryCode', async (req, res) => {
         await job.getQueryResults();
         res.status(200).send({ message: 'All tasks with the specified delivery code were deleted successfully.' });
     } catch (error) {
-        console.error('Error deleting tasks from BigQuery:', error);
+        console.error('Backend: Error deleting tasks from BigQuery:', error);
         res.status(500).send({ error: 'Failed to delete tasks from BigQuery.' });
     }
 });
