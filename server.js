@@ -18,9 +18,9 @@ const app = express();
 // Middleware setup
 // Configure CORS to allow requests from your Vercel frontend
 const allowedOrigins = [
-    'http://localhost:3000', // For local development
+    'http://localhost:3001', // For local development
     /^https:\/\/.*\.vercel\.app$/, // Regex to match any subdomain of vercel.app with HTTPS
-    'https://scheduler-ui-rvpan.vercel.app' // Explicitly keep your main Vercel URL
+    'https://scheduler-ui-roan.vercel.app' // Explicitly keep your main Vercel URL
 ];
 
 app.use(cors({
@@ -271,24 +271,46 @@ app.get('/api/per-person-per-day', async (req, res) => {
 // Modified POST route to handle both main task and Per_Key_Per_Day updates
 app.post('/api/post', async (req, res) => {
     console.log('Received request body:', JSON.stringify(req.body, null, 2)); // Log the entire request body
-    const { mainTask, perKeyPerDayRows } = req.body;
 
-    console.log('mainTask after destructuring:', mainTask); // Log mainTask
-    console.log('perKeyPerDayRows after destructuring:', perKeyPerDayRows); // Log perKeyPerDayRows
+    // Destructure directly from req.body as the frontend sends a flat object
+    const {
+        Key, Delivery_code, DelCode_w_o__, Step_ID, Task_Details, Frequency___Timeline,
+        Client, Short_Description, Planned_Start_Timestamp, Planned_Delivery_Timestamp,
+        Responsibility, Current_Status, Email, Emails, Total_Tasks, Completed_Tasks,
+        Planned_Tasks, Percent_Tasks_Completed, Created_at, Updated_at,
+        Time_Left_For_Next_Task_dd_hh_mm_ss, Card_Corner_Status, sliders // 'sliders' array is present
+    } = req.body;
 
-    // Check if mainTask is undefined before proceeding
-    if (!mainTask) {
-        console.error("mainTask is undefined in the request body.");
+    // The 'mainTask' object is implicitly the entire destructured body (excluding sliders for the main table update)
+    const mainTask = {
+        Key, Delivery_code, DelCode_w_o__, Step_ID, Task_Details, Frequency___Timeline,
+        Client, Short_Description, Planned_Start_Timestamp, Planned_Delivery_Timestamp,
+        Responsibility, Current_Status, Email, Emails, Total_Tasks, Completed_Tasks,
+        Planned_Tasks, Percent_Tasks_Completed, Created_at, Updated_at,
+        Time_Left_For_Next_Task_dd_hh_mm_ss, Card_Corner_Status
+    };
+
+    // 'perKeyPerDayRows' is directly the 'sliders' array
+    const perKeyPerDayRows = sliders;
+
+    console.log('mainTask (constructed):', mainTask); // Log mainTask
+    console.log('perKeyPerDayRows (from sliders):', perKeyPerDayRows); // Log perKeyPerDayRows
+
+    // Check if mainTask.Key is undefined before proceeding (more specific check)
+    if (mainTask.Key === undefined || mainTask.Key === null) {
+        console.error("mainTask.Key is missing in the request body.");
         return res.status(400).json({
-            message: 'Bad Request: mainTask object is missing in the request body.',
-            details: 'The server expected a "mainTask" object but received undefined.'
+            message: 'Bad Request: Task Key is missing in the request body.',
+            details: 'The server expected a "Key" property for the main task but it was not found.'
         });
     }
 
     // Convert timestamps to BigQuery compatible format for mainTask
     const formatTimestamp = (timestamp, type) => {
         if (!timestamp) return null;
-        const momentObj = moment.utc(timestamp);
+        // Remove " UTC" suffix if present before parsing
+        const cleanedTimestamp = typeof timestamp === 'string' ? timestamp.replace(' UTC', '') : timestamp;
+        const momentObj = moment.utc(cleanedTimestamp); // Parse as UTC
         if (type === 'TIMESTAMP') {
             return momentObj.isValid() ? momentObj.format('YYYY-MM-DD HH:mm:ss.SSSSSS') + ' UTC' : null;
         } else if (type === 'DATETIME') {
