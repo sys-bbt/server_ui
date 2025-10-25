@@ -72,9 +72,10 @@ const ADMIN_EMAILS_BACKEND = [
     "systems@brightbraintech.com",
     "neelam.p@brightbraintech.com",
     "meghna.j@brightbraintech.com",
+    "divya.s@brightbraintech.com",
     "zoya.a@brightbraintech.com",
-    "shweta.g@brightbraintech.com",
-    "hitesh.r@brightbraintech.com"
+    "altaf.s@brightbraintech.com",
+    "arvanbir.s@brightbraintech.com"
 ];
 
 // Define the special "System" email for tasks that should be globally visible to non-admins
@@ -508,3 +509,4 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
+
