@@ -360,16 +360,6 @@ app.post('/api/post', async (req, res) => {
         Card_Corner_Status: 'STRING',
     };
 
-    // Define schema for Per_Key_Per_Day table inserts
-    const perKeyPerDaySchema = [
-        { name: 'Key', type: 'INTEGER' },
-        { name: 'Day', type: 'DATE' },
-        { name: 'Duration', type: 'INTEGER' },
-        { name: 'Duration_Unit', type: 'STRING' },
-        { name: 'Planned_Delivery_Slot', type: 'STRING', mode: 'NULLABLE' },
-        { name: 'Responsibility', type: 'STRING' },
-    ];
-
     try {
         // 1. Update the main task table (componentv2)
         const updateMainTaskQuery = `
@@ -409,42 +399,98 @@ app.post('/api/post', async (req, res) => {
         console.log(`Backend: Main task with Key ${mainTask.Key} updated successfully.`);
 
 
-        // 2. Delete existing Per_Key_Per_Day entries for this Key
-        const deletePerKeyQuery = `
-            DELETE FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\`
-            WHERE Key = @Key
-        `;
-        const deletePerKeyOptions = {
-            query: deletePerKeyQuery,
-            params: { Key: parseInt(mainTask.Key, 10) }, // Convert Key to INT64 for deletion
-            types: { Key: 'INT64' }, 
-            location: 'US',
-        };
-        console.log('Backend: Deleting existing perKeyPerDayRows...');
-        const [deleteJob] = await bigQueryClient.createQueryJob(deletePerKeyOptions);
-        await deleteJob.getQueryResults();
-        console.log(`Backend: Existing Per_Key_Per_Day entries for Key ${mainTask.Key} deleted.`);
+        // 2. Safely Update/Replace Per_Key_Per_Day using MERGE
+        if (perKeyPerDayRows && perKeyPerDayRows.length > 0) {
+            
+            // The source data for MERGE must be structured. Since you only have one row, 
+            // we will create a one-row temporary table using UNNEST.
+
+            const newRow = perKeyPerDayRows[0];
+            const targetKey = parseInt(mainTask.Key, 10);
+            
+            const mergeQuery = `
+                MERGE INTO \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\` AS T
+                USING (
+                    SELECT 
+                        @targetKey AS Key, 
+                        @Day AS Day, 
+                        @Duration AS Duration, 
+                        @Duration_Unit AS Duration_Unit, 
+                        @Planned_Delivery_Slot AS Planned_Delivery_Slot, 
+                        @Responsibility AS Responsibility
+                ) AS S
+                ON T.Key = S.Key
+
+                -- If the Key exists in the target table (T), delete the existing row(s)
+                WHEN MATCHED THEN
+                    DELETE
+
+                -- If the Key does NOT exist in the target table (T), insert the new row (S)
+                WHEN NOT MATCHED THEN
+                    INSERT (Key, Day, Duration, Duration_Unit, Planned_Delivery_Slot, Responsibility)
+                    VALUES (S.Key, S.Day, S.Duration, S.Duration_Unit, S.Planned_Delivery_Slot, S.Responsibility)
+            `;
+
+            // Merge logic requires two steps: Delete old data, and Insert new data (if the row doesn't exist).
+            // Since your goal is effectively DELETE ALL and then INSERT, the MERGE statement above must be modified.
+            // If the row exists, we delete it (clearing the old schedule). 
+            // THEN we must insert the new schedule rows (which MERGE doesn't handle well in one go).
+            
+            // To stick to MERGE, we need to handle the case where multiple keys might exist.
+            // A more straightforward and less error-prone way is two sequential MERGE/DML statements:
+            // 2a. DELETE all existing rows for this key. (This is the failure point, but MERGE can fix it)
+            
+            const deleteMergeQuery = `
+                MERGE INTO \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\` AS T
+                USING (
+                    SELECT @targetKey AS Key
+                ) AS S
+                ON T.Key = S.Key
+                WHEN MATCHED THEN DELETE
+            `;
+            
+            const deleteMergeOptions = {
+                query: deleteMergeQuery,
+                params: { targetKey: targetKey },
+                types: { targetKey: 'INT64' },
+                location: 'US',
+            };
+            
+            console.log('Backend: Deleting existing perKeyPerDayRows using MERGE...');
+            const [deleteMergeJob] = await bigQueryClient.createQueryJob(deleteMergeOptions);
+            await deleteMergeJob.getQueryResults(); // Wait for delete to complete
+            console.log(`Backend: Existing Per_Key_Per_Day entries for Key ${targetKey} deleted using MERGE.`);
 
 
-        // 3. Insert new Per_Key_Per_Day entries
-        if (perKeyPerDayRows && perKeyPerDayRows.length > 0) {
-            const insertRows = perKeyPerDayRows.map(row => ({
-                Key: parseInt(mainTask.Key, 10), 
-                Day: row.Day, 
-                Duration: parseInt(row.Duration, 10), 
-                Duration_Unit: row.Duration_Unit, 
-                Planned_Delivery_Slot: row.Planned_Delivery_Slot || null, 
-                Responsibility: row.Responsibility, 
-            }));
+            // 2b. Insert new Per_Key_Per_Day entries (Same as previous step 3)
+            const insertRows = perKeyPerDayRows.map(row => ({
+                Key: targetKey, // Use the fixed integer key
+                Day: row.Day, 
+                Duration: parseInt(row.Duration, 10), 
+                Duration_Unit: row.Duration_Unit, 
+                Planned_Delivery_Slot: row.Planned_Delivery_Slot || null, 
+                Responsibility: row.Responsibility, 
+            }));
+            
+            const perKeyPerDaySchema = [
+                { name: 'Key', type: 'INTEGER' },
+                { name: 'Day', type: 'DATE' },
+                { name: 'Duration', type: 'INTEGER' },
+                { name: 'Duration_Unit', type: 'STRING' },
+                { name: 'Planned_Delivery_Slot', type: 'STRING', mode: 'NULLABLE' },
+                { name: 'Responsibility', type: 'STRING' },
+            ];
 
-            await bigQueryClient
-                .dataset(bigQueryDataset)
-                .table(bigQueryTable2)
-                .insert(insertRows, { schema: perKeyPerDaySchema });
-            console.log(`Backend: New Per_Key_Per_Day entries for Key ${mainTask.Key} inserted successfully.`);
-        } else {
-            console.log('Backend: No perKeyPerDayRows to insert.');
-        }
+            await bigQueryClient
+                .dataset(bigQueryDataset)
+                .table(bigQueryTable2)
+                .insert(insertRows, { schema: perKeyPerDaySchema });
+            console.log(`Backend: New Per_Key_Per_Day entries for Key ${targetKey} inserted successfully.`);
+            
+        } else {
+            console.log('Backend: No perKeyPerDayRows to insert.');
+        }
+
 
         res.status(200).send({ message: 'Task and associated schedule data updated successfully.' });
 
