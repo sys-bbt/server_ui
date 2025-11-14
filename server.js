@@ -3,7 +3,7 @@ const { BigQuery } = require('@google-cloud/bigquery');
 const cors = require('cors');
 const path = require('path');
 const dotenv = require('dotenv');
-const moment = require('moment'); 
+const moment = require('moment'); 
 
 dotenv.config();
 
@@ -17,9 +17,9 @@ const app = express();
 
 // Middleware setup
 const allowedOrigins = [
-    'http://localhost:3000', 
-    /^https:\/\/.*\.vercel\.app$/, 
-    'https://scheduler-ui-roan.vercel.app' 
+    'http://localhost:3000', 
+    /^https:\/\/.*\.vercel\.app$/, 
+    'https://scheduler-ui-roan.vercel.app' 
 ];
 
 app.use(cors({
@@ -41,11 +41,11 @@ app.use(cors({
         }
         return callback(null, true);
     },
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], 
-    allowedHeaders: ['Content-Type', 'Authorization'], 
-    credentials: true 
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], 
+    allowedHeaders: ['Content-Type', 'Authorization'], 
+    credentials: true 
 }));
-app.use(express.json()); 
+app.use(express.json()); 
 
 console.log('DEBUG: GOOGLE_PROJECT_ID:', process.env.GOOGLE_PROJECT_ID);
 console.log('DEBUG: BIGQUERY_CLIENT_EMAIL:', process.env.BIGQUERY_CLIENT_EMAIL);
@@ -94,15 +94,40 @@ app.get('/api/people-mapping', async (req, res) => {
     }
 });
 
+// 🚀 NEW ENDPOINT: Fetch only Active Unique Clients for the Filter Dropdown 🚀
+app.get('/api/active-clients', async (req, res) => {
+    // This query assumes your main table (bigQueryTable) has the 'Client' and 'Inactive' columns.
+    // We are filtering for rows where 'Inactive' is explicitly 'Active'.
+    const query = `
+        SELECT DISTINCT Client
+        FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
+        WHERE Inactive = 'Active' 
+        AND Client IS NOT NULL 
+        ORDER BY Client
+    `;
+
+    try {
+        const [rows] = await bigQueryClient.query(query);
+        // Map the result to an array of client names
+        const activeClients = rows.map(row => row.Client);
+        console.log(`Backend: Fetched ${activeClients.length} active unique clients.`);
+        res.status(200).json(activeClients);
+    } catch (error) {
+        console.error('Error fetching active clients from BigQuery:', error);
+        res.status(500).send({ error: 'Failed to fetch active client list.' });
+    }
+});
+
+
 // GET workflow headers only, with filtering for non-admins
 app.get('/api/data', async (req, res) => {
-    const userEmail = req.query.email; 
-    const searchQuery = req.query.searchQuery; 
-    const clientFilter = req.query.clientFilter; 
+    const userEmail = req.query.email; 
+    const searchQuery = req.query.searchQuery; 
+    const clientFilter = req.query.clientFilter; 
 
     let query;
     let params = {};
-    let whereClauses = [`Step_ID = 0`]; 
+    let whereClauses = [`Step_ID = 0`]; 
 
     if (userEmail && !ADMIN_EMAILS_BACKEND.includes(userEmail)) {
         whereClauses.push(`DelCode_w_o__ IN (
@@ -138,7 +163,7 @@ app.get('/api/data', async (req, res) => {
         const [rows] = await bigQueryClient.query({
             query: query,
             params: params,
-            location: 'US', 
+            location: 'US', 
         });
         res.status(200).json(rows);
     } catch (error) {
@@ -151,28 +176,28 @@ app.get('/api/data', async (req, res) => {
 app.get('/api/workflow-details/:deliveryCode', async (req, res) => {
     const { deliveryCode } = req.params;
     const query = `
-        SELECT 
-            Key, 
-            Delivery_code,
-            DelCode_w_o__,
-            Step_ID,
-            Task_Details,
-            Frequency___Timeline,
-            Client,
-            Short_Description,
-            Planned_Start_Timestamp,
-            Planned_Delivery_Timestamp,
-            Responsibility,
-            Current_Status,
-            Emails,
-            Total_Tasks,
-            Completed_Tasks,
-            Planned_Tasks,
-            Percent_Tasks_Completed,
-            Created_at,
-            Updated_at,
-            Time_Left_For_Next_Task_dd_hh_mm_ss,
-            Card_Corner_Status
+        SELECT 
+            Key, 
+            Delivery_code,
+            DelCode_w_o__,
+            Step_ID,
+            Task_Details,
+            Frequency___Timeline,
+            Client,
+            Short_Description,
+            Planned_Start_Timestamp,
+            Planned_Delivery_Timestamp,
+            Responsibility,
+            Current_Status,
+            Emails,
+            Total_Tasks,
+            Completed_Tasks,
+            Planned_Tasks,
+            Percent_Tasks_Completed,
+            Created_at,
+            Updated_at,
+            Time_Left_For_Next_Task_dd_hh_mm_ss,
+            Card_Corner_Status
         FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
         WHERE DelCode_w_o__ = @deliveryCode
     `;
@@ -194,7 +219,7 @@ app.get('/api/workflow-details/:deliveryCode', async (req, res) => {
 
 // NEW ENDPOINT: /api/per-key-per-day-by-key
 app.get('/api/per-key-per-day-by-key', async (req, res) => {
-    const { key } = req.query; 
+    const { key } = req.query; 
     if (!key) {
         return res.status(400).send({ error: 'Key parameter is required.' });
     }
@@ -204,17 +229,17 @@ app.get('/api/per-key-per-day-by-key', async (req, res) => {
         FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\`
         WHERE Key = @key
     `;
-    const params = { key: parseInt(key, 10) }; 
+    const params = { key: parseInt(key, 10) }; 
     const queryTypes = {
-        key: 'INT64' 
+        key: 'INT64' 
     };
 
     try {
         const [rows] = await bigQueryClient.query({
             query: query,
             params: params,
-            types: queryTypes, 
-            location: 'US', 
+            types: queryTypes, 
+            location: 'US', 
         });
 
         const groupedData = {
@@ -223,7 +248,7 @@ app.get('/api/per-key-per-day-by-key', async (req, res) => {
         };
         rows.forEach(row => {
             groupedData.entries.push(row);
-            groupedData.totalDuration += row.Duration || 0; 
+            groupedData.totalDuration += row.Duration || 0; 
         });
 
         if (rows.length === 0) {
@@ -278,7 +303,7 @@ app.get('/api/per-person-per-day', async (req, res) => {
 // Modified POST route to handle both main task and Per_Key_Per_Day updates
 app.post('/api/post', async (req, res) => {
     console.log('Backend: Received POST request to /api/post');
-    
+    
 
     const { mainTask, perKeyPerDayRows } = req.body;
 
@@ -390,7 +415,7 @@ app.post('/api/post', async (req, res) => {
         const updateMainTaskOptions = {
             query: updateMainTaskQuery,
             params: mainTaskRow,
-            types: mainTaskParameterTypes, 
+            types: mainTaskParameterTypes, 
             location: 'US',
         };
         console.log('Backend: Executing main task update query...');
@@ -400,96 +425,67 @@ app.post('/api/post', async (req, res) => {
 
 
         // 2. Safely Update/Replace Per_Key_Per_Day using MERGE
-        if (perKeyPerDayRows && perKeyPerDayRows.length > 0) {
-            
-            // The source data for MERGE must be structured. Since you only have one row, 
-            // we will create a one-row temporary table using UNNEST.
+        if (perKeyPerDayRows && perKeyPerDayRows.length > 0) {
+            
+            // The source data for MERGE must be structured. Since you only have one row, 
+            // we will create a one-row temporary table using UNNEST.
 
-            const newRow = perKeyPerDayRows[0];
-            const targetKey = parseInt(mainTask.Key, 10);
-            
-            const mergeQuery = `
-                MERGE INTO \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\` AS T
-                USING (
-                    SELECT 
-                        @targetKey AS Key, 
-                        @Day AS Day, 
-                        @Duration AS Duration, 
-                        @Duration_Unit AS Duration_Unit, 
-                        @Planned_Delivery_Slot AS Planned_Delivery_Slot, 
-                        @Responsibility AS Responsibility
-                ) AS S
-                ON T.Key = S.Key
-
-                -- If the Key exists in the target table (T), delete the existing row(s)
-                WHEN MATCHED THEN
-                    DELETE
-
-                -- If the Key does NOT exist in the target table (T), insert the new row (S)
-                WHEN NOT MATCHED THEN
-                    INSERT (Key, Day, Duration, Duration_Unit, Planned_Delivery_Slot, Responsibility)
-                    VALUES (S.Key, S.Day, S.Duration, S.Duration_Unit, S.Planned_Delivery_Slot, S.Responsibility)
-            `;
-
-            // Merge logic requires two steps: Delete old data, and Insert new data (if the row doesn't exist).
-            // Since your goal is effectively DELETE ALL and then INSERT, the MERGE statement above must be modified.
-            // If the row exists, we delete it (clearing the old schedule). 
-            // THEN we must insert the new schedule rows (which MERGE doesn't handle well in one go).
-            
-            // To stick to MERGE, we need to handle the case where multiple keys might exist.
-            // A more straightforward and less error-prone way is two sequential MERGE/DML statements:
-            // 2a. DELETE all existing rows for this key. (This is the failure point, but MERGE can fix it)
-            
-            const deleteMergeQuery = `
-                MERGE INTO \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\` AS T
-                USING (
-                    SELECT @targetKey AS Key
-                ) AS S
-                ON T.Key = S.Key
-                WHEN MATCHED THEN DELETE
-            `;
-            
-            const deleteMergeOptions = {
-                query: deleteMergeQuery,
-                params: { targetKey: targetKey },
-                types: { targetKey: 'INT64' },
-                location: 'US',
-            };
-            
-            console.log('Backend: Deleting existing perKeyPerDayRows using MERGE...');
-            const [deleteMergeJob] = await bigQueryClient.createQueryJob(deleteMergeOptions);
-            await deleteMergeJob.getQueryResults(); // Wait for delete to complete
-            console.log(`Backend: Existing Per_Key_Per_Day entries for Key ${targetKey} deleted using MERGE.`);
+            const newRow = perKeyPerDayRows[0];
+            const targetKey = parseInt(mainTask.Key, 10);
+            
+            // A more straightforward and less error-prone way is two sequential MERGE/DML statements:
+            // 2a. DELETE all existing rows for this key. (This is the failure point, but MERGE can fix it)
+            
+            const deleteMergeQuery = `
+                MERGE INTO \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\` AS T
+                USING (
+                    SELECT @targetKey AS Key
+                ) AS S
+                ON T.Key = S.Key
+                WHEN MATCHED THEN DELETE
+            `;
+            
+            const deleteMergeOptions = {
+                query: deleteMergeQuery,
+                params: { targetKey: targetKey },
+                types: { targetKey: 'INT64' },
+                location: 'US',
+            };
+            
+            console.log('Backend: Deleting existing perKeyPerDayRows using MERGE...');
+            const [deleteMergeJob] = await bigQueryClient.createQueryJob(deleteMergeOptions);
+            await deleteMergeJob.getQueryResults(); // Wait for delete to complete
+            console.log(`Backend: Existing Per_Key_Per_Day entries for Key ${targetKey} deleted using MERGE.`);
 
 
-            // 2b. Insert new Per_Key_Per_Day entries (Same as previous step 3)
-            const insertRows = perKeyPerDayRows.map(row => ({
-                Key: targetKey, // Use the fixed integer key
-                Day: row.Day, 
-                Duration: parseInt(row.Duration, 10), 
-                Duration_Unit: row.Duration_Unit, 
-                Planned_Delivery_Slot: row.Planned_Delivery_Slot || null, 
-                Responsibility: row.Responsibility, 
-            }));
-            
-            const perKeyPerDaySchema = [
-                { name: 'Key', type: 'INTEGER' },
-                { name: 'Day', type: 'DATE' },
-                { name: 'Duration', type: 'INTEGER' },
-                { name: 'Duration_Unit', type: 'STRING' },
-                { name: 'Planned_Delivery_Slot', type: 'STRING', mode: 'NULLABLE' },
-                { name: 'Responsibility', type: 'STRING' },
-            ];
+            // 2b. Insert new Per_Key_Per_Day entries (Same as previous step 3)
+            const insertRows = perKeyPerDayRows.map(row => ({
+                Key: targetKey, // Use the fixed integer key
+                Day: row.Day, 
+                Duration: parseInt(row.Duration, 10), 
+                Duration_Unit: row.Duration_Unit, 
+                Planned_Delivery_Slot: row.Planned_Delivery_Slot || null, 
+                Responsibility: row.Responsibility, 
+            }));
+            
+            const perKeyPerDaySchema = [
+                { name: 'Key', type: 'INTEGER' },
+                { name: 'Day', type: 'DATE' },
+                { name: 'Duration', type: 'INTEGER' },
+                { name: 'Duration_Unit', type: 'STRING' },
+                { name: 'Planned_Delivery_Slot', type: 'STRING', mode: 'NULLABLE' },
+                { name: 'Responsibility', type: 'STRING' },
+            ];
 
-            await bigQueryClient
-                .dataset(bigQueryDataset)
-                .table(bigQueryTable2)
-                .insert(insertRows, { schema: perKeyPerDaySchema });
-            console.log(`Backend: New Per_Key_Per_Day entries for Key ${targetKey} inserted successfully.`);
-            
-        } else {
-            console.log('Backend: No perKeyPerDayRows to insert.');
-        }
+            await bigQueryClient
+                .dataset(bigQueryDataset)
+                .table(bigQueryTable2)
+                .insert(insertRows, { schema: perKeyPerDaySchema });
+            console.log(`Backend: New Per_Key_Per_Day entries for Key ${targetKey} inserted successfully.`);
+            
+        } else {
+            console.log('Backend: No perKeyPerDayRows to insert.');
+        }
 
 
         res.status(200).send({ message: 'Task and associated schedule data updated successfully.' });
