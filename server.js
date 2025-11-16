@@ -78,7 +78,7 @@ async function fetchAdminEmails() {
     const query = `
         SELECT Emails
         FROM \`${projectId}.${bigQueryDataset}.${BIGQUERY_ADMIN_TABLE}\`
-        WHERE Access = TRUE  
+        WHERE Access = 'Admin'  
     `;
 
     try {
@@ -695,3 +695,4 @@ fetchAdminEmails().then(() => {
     // If the critical admin list fails to load, the server should probably exit
     process.exit(1); 
 });
+
