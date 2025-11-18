@@ -14,7 +14,7 @@ const bigQueryTable2 = "Per_Key_Per_Day";
 const bigQueryTable3 = "Per_Person_Per_Day";
 
 // 🚀 NEW: Status Update Backup Table 🚀
-const bigQueryStatusUpdateTable = "StatusUpdatesBackup"; 
+const bigQueryStatusUpdateTable = "StatusUpdatesBackup"; 
 // Note: This table name will be used with the target dataset 'PMS' as defined in the BQ DML INSERT query.
 
 const app = express();
@@ -66,7 +66,7 @@ const bigQueryClient = new BigQuery({
 
 // Define admin emails on the backend for consistency and security
 const ADMIN_EMAILS_BACKEND = [
-    "systems@brightbraintech.com",
+    "systems@brightbraintech.com",
     "neelam.p@brightbraintech.com",
     "meghna.j@brightbraintech.com",
     "divya.s@brightbraintech.com",
@@ -307,75 +307,75 @@ app.get('/api/per-person-per-day', async (req, res) => {
 
 // 🚀 NEW ENDPOINT: Update Task Status and Log to Backup Table 🚀
 app.post('/api/task/status-update', async (req, res) => {
-    console.log('Backend: Received POST request to /api/task/status-update');
+    console.log('Backend: Received POST request to /api/task/status-update');
 
-    const { key, email, status } = req.body;
+    const { key, email, status } = req.body;
 
-    if (!key || !email || !status) {
-        return res.status(400).json({
-            message: 'Bad Request: Key, email, and status are required in the request body.',
-            details: 'Missing task key, user email, or status (Complete/Not Required).'
-        });
-    }
+    if (!key || !email || !status) {
+        return res.status(400).json({
+            message: 'Bad Request: Key, email, and status are required in the request body.',
+            details: 'Missing task key, user email, or status (Complete/Not Required).'
+        });
+    }
 
-    if (status !== 'Complete' && status !== 'Not Required') {
-        return res.status(400).json({
-            message: 'Bad Request: Invalid status value.',
-            details: 'Status must be "Complete" or "Not Required".'
-        });
-    }
+    if (status !== 'Complete' && status !== 'Not Required') {
+        return res.status(400).json({
+            message: 'Bad Request: Invalid status value.',
+            details: 'Status must be "Complete" or "Not Required".'
+        });
+    }
 
-    const targetDataset = 'PMS';
-    const targetTable = bigQueryStatusUpdateTable; // "StatusUpdatesBackup"
+    const targetDataset = 'PMS';
+    const targetTable = bigQueryStatusUpdateTable; // "StatusUpdatesBackup"
 
-    // 1. Update the main task table (bigQueryTable) to set the task's Current_Status
-    // Also update Updated_at to reflect the change
-    const updateMainTaskQuery = `
-        UPDATE \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
-        SET Current_Status = @status, Updated_at = CURRENT_DATETIME('Asia/Kolkata')
-        WHERE Key = @key
-    `;
-    const updateMainTaskOptions = {
-        query: updateMainTaskQuery,
-        params: { key: parseInt(key, 10), status: status },
-        types: { key: 'INT64', status: 'STRING' },
-        location: 'US',
-    };
-    
-    // 2. Log the Status Update (Insert into the Backup table)
-    // Using BQ DML INSERT query to ensure the Timestamp is server-generated (CURRENT_TIMESTAMP()).
-    const insertBackupQuery = `
-        INSERT INTO \`stellar-acre-407408.${targetDataset}.${targetTable}\` (Timestamp, Email, Key, Status)
-        VALUES (CURRENT_TIMESTAMP(), @email, @key, @status)
-    `;
-    const insertBackupOptions = {
-        query: insertBackupQuery,
-        params: { email: email, key: parseInt(key, 10), status: status },
-        types: { email: 'STRING', key: 'INT64', status: 'STRING' },
-        location: 'US',
-    };
+    // 1. Update the main task table (bigQueryTable) to set the task's Current_Status
+    // Also update Updated_at to reflect the change
+    const updateMainTaskQuery = `
+        UPDATE \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
+        SET Current_Status = @status, Updated_at = CURRENT_DATETIME('Asia/Kolkata')
+        WHERE Key = @key
+    `;
+    const updateMainTaskOptions = {
+        query: updateMainTaskQuery,
+        params: { key: parseInt(key, 10), status: status },
+        types: { key: 'INT64', status: 'STRING' },
+        location: 'US',
+    };
+    
+    // 2. Log the Status Update (Insert into the Backup table)
+    // Using BQ DML INSERT query to ensure the Timestamp is server-generated (CURRENT_TIMESTAMP()).
+    const insertBackupQuery = `
+        INSERT INTO \`stellar-acre-407408.${targetDataset}.${targetTable}\` (Timestamp, Email, Key, Status)
+        VALUES (CURRENT_TIMESTAMP(), @email, @key, @status)
+    `;
+    const insertBackupOptions = {
+        query: insertBackupQuery,
+        params: { email: email, key: parseInt(key, 10), status: status },
+        types: { email: 'STRING', key: 'INT64', status: 'STRING' },
+        location: 'US',
+    };
 
-    try {
-        // Run Main Task Update first
-        console.log(`Backend: Updating main task status for Key ${key} to ${status}...`);
-        const [updateMainTaskJob] = await bigQueryClient.createQueryJob(updateMainTaskOptions);
-        await updateMainTaskJob.getQueryResults();
+    try {
+        // Run Main Task Update first
+        console.log(`Backend: Updating main task status for Key ${key} to ${status}...`);
+        const [updateMainTaskJob] = await bigQueryClient.createQueryJob(updateMainTaskOptions);
+        await updateMainTaskJob.getQueryResults();
 
-        // Run Backup Table Insert (Timestamp logging)
-        console.log(`Backend: Logging status update to backup table for Key ${key}...`);
-        const [insertBackupJob] = await bigQueryClient.createQueryJob(insertBackupOptions);
-        await insertBackupJob.getQueryResults();
-        
-        console.log(`Backend: Key ${key} status successfully updated and logged.`);
-        res.status(200).send({ message: 'Task status updated and logged successfully.' });
+        // Run Backup Table Insert (Timestamp logging)
+        console.log(`Backend: Logging status update to backup table for Key ${key}...`);
+        const [insertBackupJob] = await bigQueryClient.createQueryJob(insertBackupOptions);
+        await insertBackupJob.getQueryResults();
+        
+        console.log(`Backend: Key ${key} status successfully updated and logged.`);
+        res.status(200).send({ message: 'Task status updated and logged successfully.' });
 
-    } catch (error) {
-        console.error('Backend: Error processing task status update:', error);
-        res.status(500).json({
-            message: 'Failed to update task status due to a backend error.',
-            details: error.message || 'Unknown server error.',
-        });
-    }
+    } catch (error) {
+        console.error('Backend: Error processing task status update:', error);
+        res.status(500).json({
+            message: 'Failed to update task status due to a backend error.',
+            details: error.message || 'Unknown server error.',
+        });
+    }
 });
 
 
@@ -383,8 +383,9 @@ app.post('/api/task/status-update', async (req, res) => {
 app.post('/api/post', async (req, res) => {
     console.log('Backend: Received POST request to /api/post');
     
-
-    const { mainTask, perKeyPerDayRows } = req.body;
+    // 💡 FIX APPLIED HERE: Correctly destructuring the Admin's email from the payload
+    const { mainTask, perKeyPerDayRows, requestingUserEmail } = req.body;
+    const userEmail = requestingUserEmail; // Use this for the Admin check
 
         // Check if mainTask or its Key is missing
     if (!mainTask || mainTask.Key === undefined || mainTask.Key === null || String(mainTask.Key) === '') {
@@ -396,7 +397,7 @@ app.post('/api/post', async (req, res) => {
     }
 
     const taskKeyString = String(mainTask.Key);
-    const userEmail = mainTask.Email; // Expecting user email from frontend payload
+    // Removed: const userEmail = mainTask.Email; as it was incorrect.
 
     // --- 2. SERVER-SIDE RESPONSIBILITY CHANGE VALIDATION (SECURITY CHECK) ---
     try {
@@ -418,6 +419,7 @@ app.post('/api/post', async (req, res) => {
         // Check if the task exists and the Responsibility field is actually changing
         if (currentTask && currentTask.Responsibility !== mainTask.Responsibility) {
             
+            // 💡 CHECK NOW USES THE CORRECT 'userEmail'
             const isAdmin = ADMIN_EMAILS_BACKEND.includes(userEmail);
             
             // If the user is NOT an admin, reject the change
@@ -660,7 +662,3 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
-
-
-
-
