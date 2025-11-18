@@ -66,6 +66,7 @@ const bigQueryClient = new BigQuery({
 
 // Define admin emails on the backend for consistency and security
 const ADMIN_EMAILS_BACKEND = [
+    "systems@brightbraintech.com",
     "neelam.p@brightbraintech.com",
     "meghna.j@brightbraintech.com",
     "divya.s@brightbraintech.com",
@@ -659,6 +660,7 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
+
 
 
 
