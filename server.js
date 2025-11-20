@@ -14,7 +14,7 @@ const bigQueryTable2 = "Per_Key_Per_Day";
 const bigQueryTable3 = "Per_Person_Per_Day";
 
 // 🚀 NEW: BigQuery Admin Table Name (using the short name in the project structure)
-const BIGQUERY_ADMIN_TABLE_FULL_PATH = "stellar-acre-407408.Scheduler_UI.AdminEmails_Native";
+const BIGQUERY_ADMIN_TABLE_NATIVE = "stellar-acre-407408.Scheduler_UI.AdminEmails_Native";
 // 🚀 NEW: Status Update Backup Table 🚀
 const bigQueryStatusUpdateTable = "StatusUpdatesBackup";
 
@@ -747,6 +747,7 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
+
 
 
 
