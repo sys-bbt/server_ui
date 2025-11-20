@@ -91,7 +91,7 @@ async function fetchAdminEmailsFromBQ() {
     try {
         console.log('Backend: Fetching admin emails from BigQuery...');
         const [rows] = await bigQueryClient.query(query);
-        const adminEmails = rows.map(row => row.Emails).filter(email => email); // Extract and filter out nulls
+        const adminEmails = rows.map(row => row.admin_email).filter(email => email); // Extract and filter out nulls
         
         // Update cache
         cachedAdminEmails = adminEmails;
@@ -748,5 +748,6 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
+
 
 
