@@ -82,10 +82,10 @@ async function fetchAdminEmailsFromBQ() {
         return cachedAdminEmails;
     }
 
-    const query = `
-        SELECT Emails
-        FROM \`${BIGQUERY_ADMIN_TABLE_FULL_PATH}\`
-    `;
+   SELECT Emails
+    FROM \`stellar-acre-407408.Scheduler_UI.Scheduler_UI_Admins\`
+    WHERE LOWER(Emails) IS NOT NULL
+`;
 
     try {
         console.log('Backend: Fetching admin emails from BigQuery...');
@@ -747,3 +747,4 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
+
