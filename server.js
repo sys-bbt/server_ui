@@ -35,6 +35,17 @@ const allowedOrigins = [
     'https://server-ui-2.onrender.com' // Allow self-requests if needed
 ];
 
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
+};
+
 // --- 1. CORS CONFIGURATION ---
 app.use(cors({
     origin: function (origin, callback) {
@@ -757,3 +768,4 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
+
