@@ -13,21 +13,19 @@ const bigQueryTable = process.env.BIGQUERY_TABLE; // Your main task table
 const bigQueryTable2 = "Per_Key_Per_Day";
 const bigQueryTable3 = "Per_Person_Per_Day";
 
-// 🚀 NEW: BigQuery Admin Table Name (using the short name in the project structure)
-const BIGQUERY_ADMIN_TABLE_NATIVE = "stellar-acre-407408.Scheduler_UI.AdminEmails_Native";
+// 🚀 FIX: Use relative naming with environment variables for better scope control
+// We'll use the short table name and construct the full path in the query.
+const ADMIN_TABLE_SHORT_NAME = "AdminEmails_Native"; 
+const BIGQUERY_ADMIN_TABLE_NATIVE_FULL = `${projectId}.${bigQueryDataset}.${ADMIN_TABLE_SHORT_NAME}`;
+
 // 🚀 NEW: Status Update Backup Table 🚀
 const bigQueryStatusUpdateTable = "StatusUpdatesBackup";
 
 const app = express();
 
 // Middleware setup
-const allowedOrigins = [
-    'http://localhost:3000',
-    /^https:\/\/.*\.vercel\.app$/,
-    'https://scheduler-ui-roan.vercel.app'
-];
+// [ ... CORS configuration and middleware setup remains the same ... ]
 
-// --- 1. CORS CONFIGURATION ---
 app.use(cors({
     origin: function (origin, callback) {
         if (!origin) return callback(null, true);
@@ -56,6 +54,7 @@ app.use(express.json());
 console.log('DEBUG: GOOGLE_PROJECT_ID:', process.env.GOOGLE_PROJECT_ID);
 console.log('DEBUG: BIGQUERY_CLIENT_EMAIL:', process.env.BIGQUERY_CLIENT_EMAIL);
 console.log('DEBUG: BIGQUERY_PRIVATE_KEY exists:', !!process.env.BIGQUERY_PRIVATE_KEY);
+console.log('DEBUG: ADMIN_TABLE_FULL_PATH:', BIGQUERY_ADMIN_TABLE_NATIVE_FULL); // ⬅️ NEW DEBUG LOG
 
 const bigQueryClient = new BigQuery({
     projectId: projectId,
@@ -82,10 +81,13 @@ async function fetchAdminEmailsFromBQ() {
         return cachedAdminEmails;
     }
 
-   const query = `
+    const query = `
         SELECT admin_email
-        FROM \`${BIGQUERY_ADMIN_TABLE_NATIVE}\`
+        FROM \`${BIGQUERY_ADMIN_TABLE_NATIVE_FULL}\`
     `;
+    
+    // ⬅️ NEW DEBUG LOG: Check the query before execution
+    console.log(`Backend DEBUG: Querying admin table with full path: ${BIGQUERY_ADMIN_TABLE_NATIVE_FULL}`);
 
     try {
         console.log('Backend: Fetching admin emails from BigQuery...');
@@ -104,6 +106,8 @@ async function fetchAdminEmailsFromBQ() {
     }
 }
 
+// [ ... rest of the code remains the same ... ]
+
 // --- NEW ENDPOINT: Expose Admin Emails to the Frontend ---
 app.get('/api/admins', async (req, res) => {
     try {
@@ -120,6 +124,7 @@ const SYSTEM_EMAIL_FOR_GLOBAL_TASKS = "systems@brightbraintech.com";
 
 // 🎯 NEW ENDPOINT: Update Delivery Deadline (Admin Only) 🎯
 app.put('/api/delivery/update-deadline', async (req, res) => {
+// [ ... implementation remains the same ... ]
     const { delCodeWO, newDeadlineDate, userEmail } = req.body;
 
     if (!delCodeWO || !newDeadlineDate || !userEmail) {
@@ -176,6 +181,7 @@ app.put('/api/delivery/update-deadline', async (req, res) => {
 
 // Endpoint to fetch people mapping
 app.get('/api/people-mapping', async (req, res) => {
+// [ ... implementation remains the same ... ]
     const NATIVE_PEOPLE_TABLE = 'People_To_Email_Mapping_Native'; // <--- CHANGE THIS TO YOUR NEW NATIVE TABLE NAME IF DIFFERENT
     const query = `
         SELECT Current_Employes, Emp_Emails
@@ -197,6 +203,7 @@ app.get('/api/people-mapping', async (req, res) => {
 
 // 🚀 UPDATED ENDPOINT: Fetch only Active Unique Clients for the Filter Dropdown 🚀
 app.get('/api/active-clients', async (req, res) => {
+// [ ... implementation remains the same ... ]
     const query = `
         SELECT DISTINCT Client
         FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable}\`
@@ -219,6 +226,7 @@ app.get('/api/active-clients', async (req, res) => {
 
 // GET workflow headers only, with filtering for non-admins
 app.get('/api/data', async (req, res) => {
+// [ ... implementation remains the same ... ]
     const userEmail = req.query.email;
     const searchQuery = req.query.searchQuery;
     const clientFilter = req.query.clientFilter;
@@ -275,6 +283,7 @@ app.get('/api/data', async (req, res) => {
 
 // FIXED ENDPOINT: /api/workflow-details/:deliveryCode (GET all tasks for a specific workflow)
 app.get('/api/workflow-details/:deliveryCode', async (req, res) => {
+// [ ... implementation remains the same ... ]
     const { deliveryCode } = req.params;
     const query = `
         SELECT
@@ -320,6 +329,7 @@ app.get('/api/workflow-details/:deliveryCode', async (req, res) => {
 
 // NEW ENDPOINT: /api/per-key-per-day-by-key
 app.get('/api/per-key-per-day-by-key', async (req, res) => {
+// [ ... implementation remains the same ... ]
     const { key } = req.query;
     if (!key) {
         return res.status(400).send({ error: 'Key parameter is required.' });
@@ -366,6 +376,7 @@ app.get('/api/per-key-per-day-by-key', async (req, res) => {
 
 // Existing /api/per-key-per-day route (kept for other potential uses)
 app.get('/api/per-key-per-day', async (req, res) => {
+// [ ... implementation remains the same ... ]
     const query = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable2}\``;
     try {
         const [rows] = await bigQueryClient.query(query);
@@ -390,6 +401,7 @@ app.get('/api/per-key-per-day', async (req, res) => {
 
 // Existing /api/per-person-per-day route
 app.get('/api/per-person-per-day', async (req, res) => {
+// [ ... implementation remains the same ... ]
     const query = `SELECT * FROM \`${projectId}.${bigQueryDataset}.${bigQueryTable3}\``;
     try {
         const [rows] = await bigQueryClient.query(query);
@@ -403,6 +415,7 @@ app.get('/api/per-person-per-day', async (req, res) => {
 
 // 🚀 NEW ENDPOINT: Update Task Status and Log to Backup Table 🚀
 app.post('/api/task/status-update', async (req, res) => {
+// [ ... implementation remains the same ... ]
     console.log('Backend: Received POST request to /api/task/status-update');
 
     const { key, email, status } = req.body;
@@ -476,6 +489,7 @@ app.post('/api/task/status-update', async (req, res) => {
 
 // Modified POST route to handle both main task and Per_Key_Per_Day updates
 app.post('/api/post', async (req, res) => {
+// [ ... implementation remains the same ... ]
     console.log('Backend: Received POST request to /api/post');
 
     const { mainTask, perKeyPerDayRows, requestingUserEmail } = req.body;
@@ -721,6 +735,7 @@ app.post('/api/post', async (req, res) => {
 
 // Delete Task from BigQuery
 app.delete('/api/data/:deliveryCode', async (req, res) => {
+// [ ... implementation remains the same ... ]
     const { deliveryCode } = req.params;
     console.log("Backend: Delete request for deliveryCode:", deliveryCode);
     const query = `
@@ -747,8 +762,3 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
-
-
-
-
-
