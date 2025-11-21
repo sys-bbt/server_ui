@@ -165,6 +165,8 @@ async function updateSheetDeadline(delCodeWO, newDeadlineDate, userEmail) {
     const response = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
         range: `${SHEET_NAME}!${DELIVERY_CODE_COLUMN}:${DELIVERY_CODE_COLUMN}`,
+        valueInputOption: 'USER_ENTERED', // <-- CHANGE THIS
+        resource,
     });
 
     const rows = response.data.values;
@@ -855,4 +857,5 @@ app.delete('/api/data/:deliveryCode', async (req, res) => {
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
+
 });
