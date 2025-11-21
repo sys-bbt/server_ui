@@ -13,8 +13,8 @@ const bigQueryTable = process.env.BIGQUERY_TABLE; // Your main task table
 const bigQueryTable2 = "Per_Key_Per_Day";
 const bigQueryTable3 = "Per_Person_Per_Day";
 
-// 🚀 NEW: BigQuery Admin Table Name (using the short name in the project structure)
-const BIGQUERY_ADMIN_TABLE_FULL_PATH = "stellar-acre-407408.Scheduler_UI.Scheduler_UI_Admins";
+const ADMIN_TABLE_SHORT_NAME = "AdminEmails_Native"; 
+const BIGQUERY_ADMIN_TABLE_NATIVE_FULL = `${projectId}.${bigQueryDataset}.${ADMIN_TABLE_SHORT_NAME}`;
 // 🚀 NEW: Status Update Backup Table 🚀
 const bigQueryStatusUpdateTable = "StatusUpdatesBackup";
 
@@ -82,10 +82,10 @@ async function fetchAdminEmailsFromBQ() {
         return cachedAdminEmails;
     }
 
-   SELECT Emails
-    FROM \`stellar-acre-407408.Scheduler_UI.Scheduler_UI_Admins\`
-    WHERE LOWER(Emails) IS NOT NULL
-`;
+  const query = `
+        SELECT admin_email
+        FROM \`${BIGQUERY_ADMIN_TABLE_NATIVE_FULL}\`
+    `;
 
     try {
         console.log('Backend: Fetching admin emails from BigQuery...');
@@ -747,3 +747,4 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
+
